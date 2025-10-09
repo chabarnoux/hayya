@@ -1,0 +1,66 @@
+name: Ops - Update .env and Clear Cache
+
+on:
+  workflow_dispatch:
+    inputs:
+      app_path:
+        description: 'Absolute path to Laravel app on VPS'
+        required: true
+        default: '/var/www/tagxi/appsrc/Main-File-August-20/Admin-Panel-Aug-20-2025'
+      GOOGLE_MAPS_API_KEY:
+        description: 'Browser maps key'
+        required: true
+      GOOGLE_MAPS_SERVER_KEY:
+        description: 'Server maps key'
+        required: true
+      FIREBASE_PROJECT_ID:
+        description: 'Firebase project id'
+        required: true
+      FIREBASE_WEB_API_KEY:
+        description: 'Firebase web api key'
+        required: true
+      FCM_SERVER_KEY:
+        description: 'FCM legacy server key'
+        required: true
+
+jobs:
+  update-env:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: SSH to VPS and update .env
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          password: ${{ secrets.VPS_PASSWORD }}
+          port: 22
+          script: |
+            set -euo pipefail
+            APP_PATH="${{ github.event.inputs.app_path }}"
+            ENV_FILE="$APP_PATH/.env"
+            if [ ! -f "$ENV_FILE" ]; then echo "Missing .env at $ENV_FILE" >&2; exit 1; fi
+            cp "$ENV_FILE" "$ENV_FILE.$(date +%Y%m%d%H%M%S).bak"
+            replace_kv () {
+              KEY="$1"; VAL="$2";
+              if grep -qE "^${KEY}=" "$ENV_FILE"; then
+                sed -i "/^${KEY}=.*/c\${KEY}=${VAL}" "$ENV_FILE"
+              else
+                echo "${KEY}=${VAL}" >> "$ENV_FILE"
+              fi
+            }
+            replace_kv GOOGLE_MAPS_API_KEY "${{ github.event.inputs.GOOGLE_MAPS_API_KEY }}"
+            replace_kv GOOGLE_MAPS_SERVER_KEY "${{ github.event.inputs.GOOGLE_MAPS_SERVER_KEY }}"
+            replace_kv FIREBASE_PROJECT_ID "${{ github.event.inputs.FIREBASE_PROJECT_ID }}"
+            replace_kv FIREBASE_WEB_API_KEY "${{ github.event.inputs.FIREBASE_WEB_API_KEY }}"
+            replace_kv FCM_SERVER_KEY "${{ github.event.inputs.FCM_SERVER_KEY }}"
+
+            cd "$APP_PATH"
+            php artisan optimize:clear
+            php artisan config:cache
+            php artisan route:cache
+
+      - name: Report
+        run: echo "Updated .env and rebuilt caches on VPS."
