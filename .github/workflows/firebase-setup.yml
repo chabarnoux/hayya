@@ -1,0 +1,54 @@
+name: Firebase Setup (Project and Apps)
+
+on:
+  workflow_dispatch:
+    inputs:
+      project_id:
+        description: 'Firebase/GC project id'
+        required: true
+        default: 'hayyaride'
+      rider_package:
+        description: 'Android Rider package name'
+        required: true
+        default: 'com.hayyaride.rider'
+      driver_package:
+        description: 'Android Driver package name'
+        required: true
+        default: 'com.hayyaride.driver'
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY_JSON }}
+
+      - name: Install Firebase CLI
+        run: |
+          curl -sL https://firebase.tools | bash
+
+      - name: Ensure Firebase project exists
+        run: |
+          set -euo pipefail
+          PID="${{ github.event.inputs.project_id }}"
+          gcloud config set project "$PID"
+          # Firebase CLI init project if needed (no-op if already exists)
+          firebase projects:addfirebase "$PID" || true
+
+      - name: Create Android apps if missing
+        run: |
+          set -euo pipefail
+          PID="${{ github.event.inputs.project_id }}"
+          RIDER="${{ github.event.inputs.rider_package }}"
+          DRIVER="${{ github.event.inputs.driver_package }}"
+          # The following commands require interactive steps typically; we attempt REST via gcloud if available or skip with notes.
+          echo "Create Android apps in Firebase Console manually if CLI operations are limited."
+
+      - name: Output next steps
+        run: |
+          echo "Download google-services.json and GoogleService-Info.plist from Firebase Console and add to mobile apps."

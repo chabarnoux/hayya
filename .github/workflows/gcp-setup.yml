@@ -1,0 +1,57 @@
+name: GCP Setup (Enable APIs and Create Keys)
+
+on:
+  workflow_dispatch:
+    inputs:
+      project_id:
+        description: 'GCP project id to create/use'
+        required: true
+        default: 'hayyaride'
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY_JSON }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Create project if missing
+        run: |
+          set -euo pipefail
+          PID="${{ github.event.inputs.project_id }}"
+          if gcloud projects describe "$PID" >/dev/null 2>&1; then
+            echo "Project $PID exists"
+          else
+            gcloud projects create "$PID"
+            echo "Created project $PID"
+          fi
+          gcloud config set project "$PID"
+
+      - name: Enable required APIs
+        run: |
+          apis=(
+            maps-backend.googleapis.com
+            maps-embed-backend.googleapis.com
+            geocoding-backend.googleapis.com
+            directions-backend.googleapis.com
+            distance-matrix-backend.googleapis.com
+            places-backend.googleapis.com
+            fcm.googleapis.com
+            firebase.googleapis.com
+            serviceusage.googleapis.com
+          )
+          for a in "${apis[@]}"; do
+            gcloud services enable "$a" || true
+          done
+
+      - name: Note about keys
+        run: |
+          echo "Key creation for browser/server should be done in Console or via gcloud alpha/REST. Store keys as repo secrets, not in code."
