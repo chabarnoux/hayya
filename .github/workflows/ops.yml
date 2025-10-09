@@ -45,10 +45,12 @@ jobs:
             cp "$ENV_FILE" "$ENV_FILE.$(date +%Y%m%d%H%M%S).bak"
             replace_kv () {
               KEY="$1"; VAL="$2";
+              # Escape sed-sensitive chars in value
+              ESC_VAL=$(printf '%s' "$VAL" | sed -e 's/[\\/&]/\\&/g')
               if grep -qE "^${KEY}=" "$ENV_FILE"; then
-                sed -i "/^${KEY}=.*/c\${KEY}=${VAL}" "$ENV_FILE"
+                sed -i -E "s#^${KEY}=.*#${KEY}=${ESC_VAL}#" "$ENV_FILE"
               else
-                echo "${KEY}=${VAL}" >> "$ENV_FILE"
+                printf '%s=%s\n' "$KEY" "$VAL" >> "$ENV_FILE"
               fi
             }
             replace_kv GOOGLE_MAPS_API_KEY "${{ github.event.inputs.GOOGLE_MAPS_API_KEY }}"
