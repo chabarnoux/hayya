@@ -1,0 +1,210 @@
+name: Build Rider & Driver APKs (Flutter)
+
+on:
+  workflow_dispatch:
+    inputs:
+      vps_host:
+        description: 'VPS host'
+        required: true
+        default: '159.198.36.105'
+      vps_user:
+        description: 'VPS user'
+        required: true
+        default: 'root'
+      app_rider_path:
+        description: 'Absolute path to rider Flutter app on VPS'
+        required: true
+        default: '/var/www/tagxi/appsrc/Main-File-August-20/flutter_user/flutter_user'
+      app_driver_path:
+        description: 'Absolute path to driver Flutter app on VPS'
+        required: true
+        default: '/var/www/tagxi/appsrc/Main-File-August-20/flutter_driver/flutter_driver'
+      android_maps_key:
+        description: 'Android Maps API key (dev) - optional if secret provided'
+        required: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install tooling (sshpass, rsync)
+        run: sudo apt-get update && sudo apt-get install -y rsync openssh-client sshpass jq
+
+      - name: Add VPS host to known_hosts
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan -p 22 ${{ github.event.inputs.vps_host }} >> ~/.ssh/known_hosts
+
+      - name: Rsync Rider and Driver projects from VPS
+        env:
+          SSHPASS: ${{ secrets.VPS_PASSWORD }}
+        run: |
+          test -n "$SSHPASS"
+          sshpass -e rsync -a --delete ${{ github.event.inputs.vps_user }}@${{ github.event.inputs.vps_host }}:${{ github.event.inputs.app_rider_path }}/ ./rider/
+          sshpass -e rsync -a --delete ${{ github.event.inputs.vps_user }}@${{ github.event.inputs.vps_host }}:${{ github.event.inputs.app_driver_path }}/ ./driver/
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY_JSON }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Download google-services.json (Rider and Driver)
+        env:
+          PID: hayyaride
+        run: |
+          ACCESS_TOKEN=$(gcloud auth print-access-token)
+          mkdir -p firebase-configs
+          # Rider
+          RIDER_APP=$(curl -sS -H "Authorization: Bearer ${ACCESS_TOKEN}" "https://firebase.googleapis.com/v1beta1/projects/${PID}/androidApps" | jq -r '.apps[] | select(.packageName=="com.hayyaride.rider").name')
+          if [ -n "$RIDER_APP" ] && [ "$RIDER_APP" != "null" ]; then
+            curl -sS -H "Authorization: Bearer ${ACCESS_TOKEN}" "https://firebase.googleapis.com/v1beta1/${RIDER_APP}/config" | jq -r .configFileContents | base64 -d > firebase-configs/google-services-com.hayyaride.rider.json || true
+          fi
+          # Driver
+          DRIVER_APP=$(curl -sS -H "Authorization: Bearer ${ACCESS_TOKEN}" "https://firebase.googleapis.com/v1beta1/projects/${PID}/androidApps" | jq -r '.apps[] | select(.packageName=="com.hayyaride.driver").name')
+          if [ -n "$DRIVER_APP" ] && [ "$DRIVER_APP" != "null" ]; then
+            curl -sS -H "Authorization: Bearer ${ACCESS_TOKEN}" "https://firebase.googleapis.com/v1beta1/${DRIVER_APP}/config" | jq -r .configFileContents | base64 -d > firebase-configs/google-services-com.hayyaride.driver.json || true
+          fi
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.22.2'
+
+      - name: Flutter pub get (Rider)
+        working-directory: rider
+        run: flutter pub get
+
+      - name: Flutter pub get (Driver)
+        working-directory: driver
+        run: flutter pub get
+
+      - name: Inject google-services.json and maps key (Rider)
+        env:
+          ANDROID_MAPS_KEY: ${{ github.event.inputs.android_maps_key || secrets.ANDROID_MAPS_DEV_KEY }}
+        run: |
+          test -n "$ANDROID_MAPS_KEY"
+          mkdir -p rider/android/app
+          if [ -f firebase-configs/google-services-com.hayyaride.rider.json ]; then
+            cp firebase-configs/google-services-com.hayyaride.rider.json rider/android/app/google-services.json
+          fi
+          mkdir -p rider/android/app/src/main/res/values
+          cat > rider/android/app/src/main/res/values/google_maps_api.xml <<EOF
+          <resources>
+            <string name="google_maps_key" translatable="false">$ANDROID_MAPS_KEY</string>
+          </resources>
+          EOF
+          mkdir -p rider/android/app/src/main/java/com/hayyaride/rider
+          cat > rider/android/app/src/main/java/com/hayyaride/rider/MyFirebaseService.java <<'EOF'
+          package com.hayyaride.rider;
+          import android.os.Handler;
+          import android.os.Looper;
+          import android.widget.Toast;
+          import android.util.Log;
+          import com.google.firebase.messaging.FirebaseMessagingService;
+          public class MyFirebaseService extends FirebaseMessagingService {
+            @Override public void onNewToken(String token) {
+              Log.d("FCM_TOKEN", token);
+              new Handler(Looper.getMainLooper()).post(() ->
+                Toast.makeText(getApplicationContext(), "FCM: "+token, Toast.LENGTH_LONG).show()
+              );
+            }
+          }
+          EOF
+          MF=rider/android/app/src/main/AndroidManifest.xml
+          if ! grep -q 'com.google.android.geo.API_KEY' "$MF"; then
+            sed -i "/<application/a \\    <meta-data android:name=\"com.google.android.geo.API_KEY\" android:value=\"@string/google_maps_key\" \/>" "$MF"
+          fi
+          if ! grep -q 'MyFirebaseService' "$MF"; then
+            sed -i "/<application/a \\    <service android:name=\".MyFirebaseService\" android:exported=\"false\">\\n        <intent-filter>\\n            <action android:name=\"com.google.firebase.MESSAGING_EVENT\" \/>\\n        <\/intent-filter>\\n    <\/service>" "$MF"
+          fi
+          APP_GRADLE=rider/android/app/build.gradle
+          PROJ_GRADLE=rider/android/build.gradle
+          grep -q "apply plugin: \"com.google.gms.google-services\"" "$APP_GRADLE" || echo "apply plugin: \"com.google.gms.google-services\"" >> "$APP_GRADLE"
+          grep -q "com.google.gms:google-services" "$PROJ_GRADLE" || sed -i "s/dependencies {/dependencies\n        classpath 'com.google.gms:google-services:4.4.2'/" "$PROJ_GRADLE"
+          # Ensure firebase messaging dependency (append a small block)
+          cat >> "$APP_GRADLE" <<'EOF'
+          
+          dependencies {
+            implementation platform('com.google.firebase:firebase-bom:33.7.0')
+            implementation 'com.google.firebase:firebase-messaging'
+          }
+          EOF
+
+      - name: Inject google-services.json and maps key (Driver)
+        env:
+          ANDROID_MAPS_KEY: ${{ github.event.inputs.android_maps_key || secrets.ANDROID_MAPS_DEV_KEY }}
+        run: |
+          test -n "$ANDROID_MAPS_KEY"
+          mkdir -p driver/android/app
+          if [ -f firebase-configs/google-services-com.hayyaride.driver.json ]; then
+            cp firebase-configs/google-services-com.hayyaride.driver.json driver/android/app/google-services.json
+          fi
+          mkdir -p driver/android/app/src/main/res/values
+          cat > driver/android/app/src/main/res/values/google_maps_api.xml <<EOF
+          <resources>
+            <string name="google_maps_key" translatable="false">$ANDROID_MAPS_KEY</string>
+          </resources>
+          EOF
+          mkdir -p driver/android/app/src/main/java/com/hayyaride/driver
+          cat > driver/android/app/src/main/java/com/hayyaride/driver/MyFirebaseService.java <<'EOF'
+          package com.hayyaride.driver;
+          import android.os.Handler;
+          import android.os.Looper;
+          import android.widget.Toast;
+          import android.util.Log;
+          import com.google.firebase.messaging.FirebaseMessagingService;
+          public class MyFirebaseService extends FirebaseMessagingService {
+            @Override public void onNewToken(String token) {
+              Log.d("FCM_TOKEN", token);
+              new Handler(Looper.getMainLooper()).post(() ->
+                Toast.makeText(getApplicationContext(), "FCM: "+token, Toast.LENGTH_LONG).show()
+              );
+            }
+          }
+          EOF
+          MF=driver/android/app/src/main/AndroidManifest.xml
+          if ! grep -q 'com.google.android.geo.API_KEY' "$MF"; then
+            sed -i "/<application/a \\    <meta-data android:name=\"com.google.android.geo.API_KEY\" android:value=\"@string/google_maps_key\" \/>" "$MF"
+          fi
+          if ! grep -q 'MyFirebaseService' "$MF"; then
+            sed -i "/<application/a \\    <service android:name=\".MyFirebaseService\" android:exported=\"false\">\\n        <intent-filter>\\n            <action android:name=\"com.google.firebase.MESSAGING_EVENT\" \/>\\n        <\/intent-filter>\\n    <\/service>" "$MF"
+          fi
+          APP_GRADLE=driver/android/app/build.gradle
+          PROJ_GRADLE=driver/android/build.gradle
+          grep -q "apply plugin: \"com.google.gms.google-services\"" "$APP_GRADLE" || echo "apply plugin: \"com.google.gms.google-services\"" >> "$APP_GRADLE"
+          grep -q "com.google.gms:google-services" "$PROJ_GRADLE" || sed -i "s/dependencies {/dependencies\n        classpath 'com.google.gms:google-services:4.4.2'/" "$PROJ_GRADLE"
+          cat >> "$APP_GRADLE" <<'EOF'
+          
+          dependencies {
+            implementation platform('com.google.firebase:firebase-bom:33.7.0')
+            implementation 'com.google.firebase:firebase-messaging'
+          }
+          EOF
+
+      - name: Build Rider APK (debug)
+        working-directory: rider
+        run: flutter build apk --debug
+
+      - name: Build Driver APK (debug)
+        working-directory: driver
+        run: flutter build apk --debug
+
+      - name: Upload APK artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: hayyaride-apks
+          path: |
+            rider/build/app/outputs/flutter-apk/app-debug.apk
+            driver/build/app/outputs/flutter-apk/app-debug.apk
