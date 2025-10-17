@@ -1,0 +1,12 @@
+// Add these entries inside config/services.php return array
+
+'google' => [
+    'maps_js_key'    => env('GOOGLE_MAPS_API_KEY'),
+    'maps_server_key'=> env('GOOGLE_MAPS_SERVER_KEY'),
+],
+
+'firebase' => [
+    'project_id'       => env('FIREBASE_PROJECT_ID'),
+    'web_api_key'      => env('FIREBASE_WEB_API_KEY'),
+    'legacy_server_key'=> env('FCM_SERVER_KEY'),
+],

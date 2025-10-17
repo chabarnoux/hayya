@@ -1,0 +1,112 @@
+name: GCP - Create and Restrict API Keys
+
+on:
+  workflow_dispatch:
+    inputs:
+      project_id:
+        description: 'GCP project id'
+        required: true
+        default: 'hayyaride'
+      server_ip:
+        description: 'VPS public IP for server key restriction'
+        required: true
+        default: '159.198.36.105'
+      referrer:
+        description: 'Allowed HTTP referrer (glob) for browser key'
+        required: true
+        default: 'https://*.hayyaride.com/*'
+
+jobs:
+  create-keys:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Auth to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY_JSON }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Enable API Keys API
+        run: |
+          gcloud config set project "${{ github.event.inputs.project_id }}"
+          gcloud services enable apikeys.googleapis.com
+
+      - name: Create Browser API key (restricted)
+        id: browser
+        run: |
+          set -euo pipefail
+          ACCESS_TOKEN=$(gcloud auth print-access-token)
+          PID=${{ github.event.inputs.project_id }}
+          REF=${{ github.event.inputs.referrer }}
+          read -r -d '' BODY <<EOF
+          {
+            "displayName": "hayyaride-browser",
+            "restrictions": {
+              "browserKeyRestrictions": {
+                "allowedReferrers": ["${REF}"]
+              },
+              "apiTargets": [
+                {"service": "maps-backend.googleapis.com"},
+                {"service": "geocoding-backend.googleapis.com"},
+                {"service": "directions-backend.googleapis.com"},
+                {"service": "distance-matrix-backend.googleapis.com"},
+                {"service": "places-backend.googleapis.com"}
+              ]
+            }
+          }
+          EOF
+          RESP=$(curl -sS -X POST \
+            -H "Authorization: Bearer ${ACCESS_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d "${BODY}" \
+            "https://apikeys.googleapis.com/v2/projects/${PID}/locations/global/keys")
+          echo "$RESP" | jq . >/tmp/resp.json
+          KEY=$(jq -r '.keyString' /tmp/resp.json)
+          echo "::add-mask::${KEY}"
+          echo "key=${KEY}" >> $GITHUB_OUTPUT
+
+      - name: Create Server API key (restricted)
+        id: server
+        run: |
+          set -euo pipefail
+          ACCESS_TOKEN=$(gcloud auth print-access-token)
+          PID=${{ github.event.inputs.project_id }}
+          IP=${{ github.event.inputs.server_ip }}
+          read -r -d '' BODY <<EOF
+          {
+            "displayName": "hayyaride-server",
+            "restrictions": {
+              "serverKeyRestrictions": {
+                "allowedIps": ["${IP}"]
+              },
+              "apiTargets": [
+                {"service": "maps-backend.googleapis.com"},
+                {"service": "geocoding-backend.googleapis.com"},
+                {"service": "directions-backend.googleapis.com"},
+                {"service": "distance-matrix-backend.googleapis.com"},
+                {"service": "places-backend.googleapis.com"}
+              ]
+            }
+          }
+          EOF
+          RESP=$(curl -sS -X POST \
+            -H "Authorization: Bearer ${ACCESS_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d "${BODY}" \
+            "https://apikeys.googleapis.com/v2/projects/${PID}/locations/global/keys")
+          echo "$RESP" | jq . >/tmp/resp.json
+          KEY=$(jq -r '.keyString' /tmp/resp.json)
+          echo "::add-mask::${KEY}"
+          echo "key=${KEY}" >> $GITHUB_OUTPUT
+
+      - name: Output
+        run: |
+          echo "Browser key and Server key created. Retrieve from job outputs (masked in logs)."

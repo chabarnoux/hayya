@@ -1,0 +1,130 @@
+name: Firebase Setup (Project and Apps)
+
+on:
+  workflow_dispatch:
+    inputs:
+      project_id:
+        description: 'Firebase/GC project id'
+        required: true
+        default: 'hayyaride'
+      rider_package:
+        description: 'Android Rider package name'
+        required: true
+        default: 'com.hayyaride.rider'
+      driver_package:
+        description: 'Android Driver package name'
+        required: true
+        default: 'com.hayyaride.driver'
+      rider_bundle_id:
+        description: 'iOS Rider bundle id'
+        required: true
+        default: 'com.hayyaride.rider'
+      driver_bundle_id:
+        description: 'iOS Driver bundle id'
+        required: true
+        default: 'com.hayyaride.driver'
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY_JSON }}
+
+      - name: Ensure Firebase project exists
+        run: |
+          set -euo pipefail
+          PID="${{ github.event.inputs.project_id }}"
+          gcloud config set project "$PID"
+          # Enable Firebase services for the project
+          gcloud services enable firebase.googleapis.com || true
+          # Add Firebase to GCP project via REST (idempotent)
+          ACCESS_TOKEN=$(gcloud auth print-access-token)
+          curl -sS -X POST \
+            -H "Authorization: Bearer ${ACCESS_TOKEN}" \
+            -H "Content-Type: application/json" \
+            "https://firebase.googleapis.com/v1beta1/projects/${PID}:addFirebase" || true
+
+      - name: Create Android apps (rider/driver) and download configs
+        run: |
+          set -euo pipefail
+          PID="${{ github.event.inputs.project_id }}"
+          RIDER="${{ github.event.inputs.rider_package }}"
+          DRIVER="${{ github.event.inputs.driver_package }}"
+          ACCESS_TOKEN=$(gcloud auth print-access-token)
+
+          create_android_app() {
+            local PACKAGE="$1"; local DISPLAY="$2";
+            echo "Creating Android app ${PACKAGE} if missing..."
+            # Try to find existing apps
+            APPS=$(curl -sS -H "Authorization: Bearer ${ACCESS_TOKEN}" \
+              "https://firebase.googleapis.com/v1beta1/projects/${PID}/androidApps")
+            APPNAME=$(echo "$APPS" | jq -r ".apps[] | select(.packageName==\"${PACKAGE}\").name" 2>/dev/null || true)
+            if [ -z "$APPNAME" ] || [ "$APPNAME" = "null" ]; then
+              RESP=$(curl -sS -X POST \
+                -H "Authorization: Bearer ${ACCESS_TOKEN}" \
+                -H "Content-Type: application/json" \
+                -d "{\"packageName\":\"${PACKAGE}\",\"displayName\":\"${DISPLAY}\"}" \
+                "https://firebase.googleapis.com/v1beta1/projects/${PID}/androidApps")
+              APPNAME=$(echo "$RESP" | jq -r '.name')
+            fi
+            echo "Android app resource: $APPNAME"
+            # Download google-services.json
+            CFG=$(curl -sS -H "Authorization: Bearer ${ACCESS_TOKEN}" \
+              "https://firebase.googleapis.com/v1beta1/${APPNAME}/config")
+            CONTENT=$(echo "$CFG" | jq -r '.configFileContents')
+            echo "$CONTENT" | base64 -d > "google-services-${PACKAGE}.json"
+          }
+
+          create_android_app "$RIDER" "Hayya Rider"
+          create_android_app "$DRIVER" "Hayya Driver"
+
+      - name: Create iOS apps (rider/driver) and download configs
+        run: |
+          set -euo pipefail
+          PID="${{ github.event.inputs.project_id }}"
+          RIDER_BUNDLE="${{ github.event.inputs.rider_bundle_id }}"
+          DRIVER_BUNDLE="${{ github.event.inputs.driver_bundle_id }}"
+          ACCESS_TOKEN=$(gcloud auth print-access-token)
+
+          create_ios_app() {
+            local BUNDLE="$1"; local DISPLAY="$2";
+            echo "Creating iOS app ${BUNDLE} if missing..."
+            APPS=$(curl -sS -H "Authorization: Bearer ${ACCESS_TOKEN}" \
+              "https://firebase.googleapis.com/v1beta1/projects/${PID}/iosApps")
+            APPNAME=$(echo "$APPS" | jq -r ".apps[] | select(.bundleId==\"${BUNDLE}\").name" 2>/dev/null || true)
+            if [ -z "$APPNAME" ] || [ "$APPNAME" = "null" ]; then
+              RESP=$(curl -sS -X POST \
+                -H "Authorization: Bearer ${ACCESS_TOKEN}" \
+                -H "Content-Type: application/json" \
+                -d "{\"bundleId\":\"${BUNDLE}\",\"displayName\":\"${DISPLAY}\"}" \
+                "https://firebase.googleapis.com/v1beta1/projects/${PID}/iosApps")
+              APPNAME=$(echo "$RESP" | jq -r '.name')
+            fi
+            echo "iOS app resource: $APPNAME"
+            # Download GoogleService-Info.plist (base64 content)
+            CFG=$(curl -sS -H "Authorization: Bearer ${ACCESS_TOKEN}" \
+              "https://firebase.googleapis.com/v1beta1/${APPNAME}/config")
+            CONTENT=$(echo "$CFG" | jq -r '.configFileContents')
+            echo "$CONTENT" | base64 -d > "GoogleService-Info-${BUNDLE}.plist"
+          }
+
+          create_ios_app "$RIDER_BUNDLE" "Hayya Rider"
+          create_ios_app "$DRIVER_BUNDLE" "Hayya Driver"
+
+      - name: Upload configs as artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: firebase-configs
+          path: |
+            google-services-*.json
+            GoogleService-Info-*.plist
+
+      - name: Output next steps
+        run: |
+          echo "Download google-services.json and GoogleService-Info.plist from Firebase Console and add to mobile apps."
