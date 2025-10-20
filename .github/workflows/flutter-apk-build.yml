@@ -85,15 +85,26 @@ jobs:
           cache: true
 
       - name: Flutter version
-        run: flutter --version
+        run: |
+          echo "FLUTTER_HOME=$FLUTTER_HOME"
+          $FLUTTER_HOME/bin/flutter --version
+          $FLUTTER_HOME/bin/dart --version
 
       - name: Flutter pub get (Rider)
         working-directory: rider
-        run: flutter pub get
+        run: |
+          echo "Using Flutter at: $FLUTTER_HOME"
+          $FLUTTER_HOME/bin/flutter --version
+          $FLUTTER_HOME/bin/dart --version
+          $FLUTTER_HOME/bin/flutter pub get
 
       - name: Flutter pub get (Driver)
         working-directory: driver
-        run: flutter pub get
+        run: |
+          echo "Using Flutter at: $FLUTTER_HOME"
+          $FLUTTER_HOME/bin/flutter --version
+          $FLUTTER_HOME/bin/dart --version
+          $FLUTTER_HOME/bin/flutter pub get
 
       - name: Inject google-services.json and maps key (Rider)
         env:
@@ -200,11 +211,11 @@ jobs:
 
       - name: Build Rider APK (debug)
         working-directory: rider
-        run: flutter build apk --debug
+        run: $FLUTTER_HOME/bin/flutter build apk --debug
 
       - name: Build Driver APK (debug)
         working-directory: driver
-        run: flutter build apk --debug
+        run: $FLUTTER_HOME/bin/flutter build apk --debug
 
       - name: Upload APK artifacts
         uses: actions/upload-artifact@v4
