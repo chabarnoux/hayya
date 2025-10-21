@@ -111,6 +111,22 @@ jobs:
             fi
           done
 
+      - name: Pin incompatible packages for Dart 3.5 (Driver)
+        run: |
+          set -euo pipefail
+          FILE="driver/pubspec.yaml"
+          if [ -f "$FILE" ]; then
+            cp "$FILE" "$FILE.orig2" || true
+            # If location >=8 is requested, pin to ^7.0.0 for Dart 3.5.3 compatibility
+            if grep -Eq '^\s*location:\s*\^?8' "$FILE"; then
+              sed -i -E 's/^([[:space:]]*location:[[:space:]])\^?8[[:digit:].-]*/\1^7.0.0/' "$FILE"
+            fi
+            echo "--- pubspec diff (location pin) for $FILE ---"
+            git --no-pager diff --no-index -- "$FILE.orig2" "$FILE" || true
+            echo "--- tail of $FILE (post-pin) ---"
+            tail -n 40 "$FILE" || true
+          fi
+
       - name: Authenticate to Google Cloud
         if: ${{ steps.secrets.outputs.has_gcp == 'true' }}
         uses: google-github-actions/auth@v2
