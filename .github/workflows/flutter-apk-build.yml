@@ -22,6 +22,11 @@ on:
       android_maps_key:
         description: 'Android Maps API key (dev) - optional if secret provided'
         required: false
+  push:
+    branches:
+      - cursor/fix-collection-package-conflict-in-apps-dea2
+    paths:
+      - .github/workflows/flutter-apk-build.yml
 
 jobs:
   build:
@@ -52,8 +57,13 @@ jobs:
           SSHPASS: ${{ secrets.VPS_PASSWORD }}
         run: |
           test -n "$SSHPASS"
-          sshpass -e rsync -a --delete ${{ github.event.inputs.vps_user }}@${{ github.event.inputs.vps_host }}:${{ github.event.inputs.app_rider_path }}/ ./rider/
-          sshpass -e rsync -a --delete ${{ github.event.inputs.vps_user }}@${{ github.event.inputs.vps_host }}:${{ github.event.inputs.app_driver_path }}/ ./driver/
+          VPS_HOST="${{ github.event.inputs.vps_host || '159.198.36.105' }}"
+          VPS_USER="${{ github.event.inputs.vps_user || 'root' }}"
+          RIDER_PATH="${{ github.event.inputs.app_rider_path || '/var/www/tagxi/appsrc/Main-File-August-20/flutter_user/flutter_user' }}"
+          DRIVER_PATH="${{ github.event.inputs.app_driver_path || '/var/www/tagxi/appsrc/Main-File-August-20/flutter_driver/flutter_driver' }}"
+          echo "Using VPS ${VPS_USER}@${VPS_HOST}"
+          sshpass -e rsync -a --delete "${VPS_USER}@${VPS_HOST}:${RIDER_PATH}/" ./rider/
+          sshpass -e rsync -a --delete "${VPS_USER}@${VPS_HOST}:${DRIVER_PATH}/" ./driver/
 
       - name: Enforce collection 1.18.0 override (Rider & Driver)
         run: |
@@ -62,6 +72,7 @@ jobs:
             FILE="$APP/pubspec.yaml"
             if [ -f "$FILE" ]; then
               echo "Processing $FILE"
+              cp "$FILE" "$FILE.orig" || true
               if ! grep -q '^dependency_overrides:' "$FILE"; then
                 printf "\ndependency_overrides:\n  collection: 1.18.0\n" >> "$FILE"
               else
@@ -92,7 +103,9 @@ jobs:
                   }
                 }' "$FILE" > "$FILE.tmp" && mv "$FILE.tmp" "$FILE"
               fi
-              echo "--- tail of $FILE ---"
+              echo "--- pubspec diff for $FILE ---"
+              git --no-pager diff --no-index -- "$FILE.orig" "$FILE" || true
+              echo "--- tail of $FILE (post-edit) ---"
               tail -n 60 "$FILE" || true
             fi
           done
