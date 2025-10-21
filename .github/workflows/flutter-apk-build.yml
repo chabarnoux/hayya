@@ -217,7 +217,6 @@ jobs:
         env:
           ANDROID_MAPS_KEY: ${{ github.event.inputs.android_maps_key || secrets.ANDROID_MAPS_DEV_KEY }}
         run: |
-          test -n "$ANDROID_MAPS_KEY"
           mkdir -p rider/android/app
           # Prefer downloaded config; otherwise fall back to repo copy if present
           if [ -f firebase-configs/google-services-com.hayyaride.rider.json ]; then
@@ -225,16 +224,24 @@ jobs:
           elif [ -f deploy/outputs/firebase_configs/google-services-com.hayyaride.rider.json ]; then
             cp deploy/outputs/firebase_configs/google-services-com.hayyaride.rider.json rider/android/app/google-services.json
           fi
-          mkdir -p rider/android/app/src/main/res/values
-          cat > rider/android/app/src/main/res/values/google_maps_api.xml <<EOF
-          <resources>
-            <string name="google_maps_key" translatable="false">$ANDROID_MAPS_KEY</string>
-          </resources>
-          EOF
+          if [ -n "$ANDROID_MAPS_KEY" ]; then
+            mkdir -p rider/android/app/src/main/res/values
+            cat > rider/android/app/src/main/res/values/google_maps_api.xml <<EOF
+            <resources>
+              <string name="google_maps_key" translatable="false">$ANDROID_MAPS_KEY</string>
+            </resources>
+            EOF
+          else
+            echo "ANDROID_MAPS_KEY not set; skipping maps key XML injection"
+          fi
           MF=rider/android/app/src/main/AndroidManifest.xml
           if [ -f "$MF" ]; then
-            if ! grep -q 'com.google.android.geo.API_KEY' "$MF"; then
-              sed -i "/<application/a \\    <meta-data android:name=\"com.google.android.geo.API_KEY\" android:value=\"@string/google_maps_key\" \/>" "$MF"
+            if [ -n "$ANDROID_MAPS_KEY" ]; then
+              if ! grep -q 'com.google.android.geo.API_KEY' "$MF"; then
+                sed -i "/<application/a \\    <meta-data android:name=\"com.google.android.geo.API_KEY\" android:value=\"@string/google_maps_key\" \/>" "$MF"
+              fi
+            else
+              echo "ANDROID_MAPS_KEY not set; skipping manifest meta-data injection"
             fi
           fi
           APP_GRADLE=rider/android/app/build.gradle
@@ -286,7 +293,6 @@ jobs:
         env:
           ANDROID_MAPS_KEY: ${{ github.event.inputs.android_maps_key || secrets.ANDROID_MAPS_DEV_KEY }}
         run: |
-          test -n "$ANDROID_MAPS_KEY"
           mkdir -p driver/android/app
           # Prefer downloaded config; otherwise fall back to repo copy if present
           if [ -f firebase-configs/google-services-com.hayyaride.driver.json ]; then
@@ -294,16 +300,24 @@ jobs:
           elif [ -f deploy/outputs/firebase_configs/google-services-com.hayyaride.driver.json ]; then
             cp deploy/outputs/firebase_configs/google-services-com.hayyaride.driver.json driver/android/app/google-services.json
           fi
-          mkdir -p driver/android/app/src/main/res/values
-          cat > driver/android/app/src/main/res/values/google_maps_api.xml <<EOF
-          <resources>
-            <string name="google_maps_key" translatable="false">$ANDROID_MAPS_KEY</string>
-          </resources>
-          EOF
+          if [ -n "$ANDROID_MAPS_KEY" ]; then
+            mkdir -p driver/android/app/src/main/res/values
+            cat > driver/android/app/src/main/res/values/google_maps_api.xml <<EOF
+            <resources>
+              <string name="google_maps_key" translatable="false">$ANDROID_MAPS_KEY</string>
+            </resources>
+            EOF
+          else
+            echo "ANDROID_MAPS_KEY not set; skipping maps key XML injection"
+          fi
           MF=driver/android/app/src/main/AndroidManifest.xml
           if [ -f "$MF" ]; then
-            if ! grep -q 'com.google.android.geo.API_KEY' "$MF"; then
-              sed -i "/<application/a \\    <meta-data android:name=\"com.google.android.geo.API_KEY\" android:value=\"@string/google_maps_key\" \/>" "$MF"
+            if [ -n "$ANDROID_MAPS_KEY" ]; then
+              if ! grep -q 'com.google.android.geo.API_KEY' "$MF"; then
+                sed -i "/<application/a \\    <meta-data android:name=\"com.google.android.geo.API_KEY\" android:value=\"@string/google_maps_key\" \/>" "$MF"
+              fi
+            else
+              echo "ANDROID_MAPS_KEY not set; skipping manifest meta-data injection"
             fi
           fi
           APP_GRADLE=driver/android/app/build.gradle
