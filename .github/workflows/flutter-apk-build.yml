@@ -30,6 +30,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Determine available secrets
+        id: secrets
+        run: |
+          has_vps=$([ -n "${{ secrets.VPS_PASSWORD }}" ] && echo true || echo false)
+          has_gcp=$([ -n "${{ secrets.GCP_SA_KEY_JSON }}" ] && echo true || echo false)
+          echo "has_vps=$has_vps" >> "$GITHUB_OUTPUT"
+          echo "has_gcp=$has_gcp" >> "$GITHUB_OUTPUT"
+
       - name: Install tooling (sshpass, rsync)
         run: sudo apt-get update && sudo apt-get install -y rsync openssh-client sshpass jq
 
@@ -39,6 +47,7 @@ jobs:
           ssh-keyscan -p 22 ${{ github.event.inputs.vps_host }} >> ~/.ssh/known_hosts
 
       - name: Rsync Rider and Driver projects from VPS
+        if: ${{ steps.secrets.outputs.has_vps == 'true' }}
         env:
           SSHPASS: ${{ secrets.VPS_PASSWORD }}
         run: |
@@ -47,14 +56,17 @@ jobs:
           sshpass -e rsync -a --delete ${{ github.event.inputs.vps_user }}@${{ github.event.inputs.vps_host }}:${{ github.event.inputs.app_driver_path }}/ ./driver/
 
       - name: Authenticate to Google Cloud
+        if: ${{ steps.secrets.outputs.has_gcp == 'true' }}
         uses: google-github-actions/auth@v2
         with:
           credentials_json: ${{ secrets.GCP_SA_KEY_JSON }}
 
       - name: Set up gcloud
+        if: ${{ steps.secrets.outputs.has_gcp == 'true' }}
         uses: google-github-actions/setup-gcloud@v2
 
       - name: Download google-services.json (Rider and Driver)
+        if: ${{ steps.secrets.outputs.has_gcp == 'true' }}
         env:
           PID: hayyaride
         run: |
@@ -77,12 +89,27 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
+      - name: Set Gradle and Java memory options
+        run: |
+          echo "GRADLE_OPTS=-Dorg.gradle.jvmargs=-Xmx3g -Dkotlin.daemon.jvm.options=-Xmx1024m" >> $GITHUB_ENV
+          echo "JAVA_TOOL_OPTIONS=-Xmx2g" >> $GITHUB_ENV
+
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
           flutter-version: '3.24.3'
           channel: 'stable'
           cache: true
+
+      - name: Accept Android SDK licenses (best-effort)
+        run: |
+          if command -v sdkmanager >/dev/null 2>&1; then
+            yes | sdkmanager --licenses || true
+          elif [ -n "${ANDROID_SDK_ROOT:-}" ] && [ -x "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" ]; then
+            yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --licenses || true
+          else
+            echo "sdkmanager not found; skipping license acceptance"
+          fi
 
       - name: Flutter version
         run: |
@@ -92,6 +119,7 @@ jobs:
           dart --version
 
       - name: Flutter pub get (Rider)
+        if: ${{ hashFiles('rider/pubspec.yaml') != '' }}
         working-directory: rider
         run: |
           flutter --version
@@ -99,6 +127,7 @@ jobs:
           flutter pub get
 
       - name: Flutter pub get (Driver)
+        if: ${{ hashFiles('driver/pubspec.yaml') != '' }}
         working-directory: driver
         run: |
           flutter --version
@@ -106,13 +135,17 @@ jobs:
           flutter pub get
 
       - name: Inject google-services.json and maps key (Rider)
+        if: ${{ hashFiles('rider/android/app/src/main/AndroidManifest.xml') != '' }}
         env:
           ANDROID_MAPS_KEY: ${{ github.event.inputs.android_maps_key || secrets.ANDROID_MAPS_DEV_KEY }}
         run: |
           test -n "$ANDROID_MAPS_KEY"
           mkdir -p rider/android/app
+          # Prefer downloaded config; otherwise fall back to repo copy if present
           if [ -f firebase-configs/google-services-com.hayyaride.rider.json ]; then
             cp firebase-configs/google-services-com.hayyaride.rider.json rider/android/app/google-services.json
+          elif [ -f deploy/outputs/firebase_configs/google-services-com.hayyaride.rider.json ]; then
+            cp deploy/outputs/firebase_configs/google-services-com.hayyaride.rider.json rider/android/app/google-services.json
           fi
           mkdir -p rider/android/app/src/main/res/values
           cat > rider/android/app/src/main/res/values/google_maps_api.xml <<EOF
@@ -120,51 +153,68 @@ jobs:
             <string name="google_maps_key" translatable="false">$ANDROID_MAPS_KEY</string>
           </resources>
           EOF
-          mkdir -p rider/android/app/src/main/java/com/hayyaride/rider
-          cat > rider/android/app/src/main/java/com/hayyaride/rider/MyFirebaseService.java <<'EOF'
-          package com.hayyaride.rider;
-          import android.os.Handler;
-          import android.os.Looper;
-          import android.widget.Toast;
-          import android.util.Log;
-          import com.google.firebase.messaging.FirebaseMessagingService;
-          public class MyFirebaseService extends FirebaseMessagingService {
-            @Override public void onNewToken(String token) {
-              Log.d("FCM_TOKEN", token);
-              new Handler(Looper.getMainLooper()).post(() ->
-                Toast.makeText(getApplicationContext(), "FCM: "+token, Toast.LENGTH_LONG).show()
-              );
-            }
-          }
-          EOF
           MF=rider/android/app/src/main/AndroidManifest.xml
-          if ! grep -q 'com.google.android.geo.API_KEY' "$MF"; then
-            sed -i "/<application/a \\    <meta-data android:name=\"com.google.android.geo.API_KEY\" android:value=\"@string/google_maps_key\" \/>" "$MF"
-          fi
-          if ! grep -q 'MyFirebaseService' "$MF"; then
-            sed -i "/<application/a \\    <service android:name=\".MyFirebaseService\" android:exported=\"false\">\\n        <intent-filter>\\n            <action android:name=\"com.google.firebase.MESSAGING_EVENT\" \/>\\n        <\/intent-filter>\\n    <\/service>" "$MF"
+          if [ -f "$MF" ]; then
+            if ! grep -q 'com.google.android.geo.API_KEY' "$MF"; then
+              sed -i "/<application/a \\    <meta-data android:name=\"com.google.android.geo.API_KEY\" android:value=\"@string/google_maps_key\" \/>" "$MF"
+            fi
           fi
           APP_GRADLE=rider/android/app/build.gradle
           PROJ_GRADLE=rider/android/build.gradle
-          grep -q "apply plugin: \"com.google.gms.google-services\"" "$APP_GRADLE" || echo "apply plugin: \"com.google.gms.google-services\"" >> "$APP_GRADLE"
-          grep -q "com.google.gms:google-services" "$PROJ_GRADLE" || sed -i "s/dependencies {/dependencies\n        classpath 'com.google.gms:google-services:4.4.2'/" "$PROJ_GRADLE"
-          # Ensure firebase messaging dependency (append a small block)
-          cat >> "$APP_GRADLE" <<'EOF'
-          
-          dependencies {
-            implementation platform('com.google.firebase:firebase-bom:33.7.0')
-            implementation 'com.google.firebase:firebase-messaging'
-          }
-          EOF
+          if [ -f rider/android/app/google-services.json ]; then
+            echo "google-services.json found for Rider; enabling Firebase plugin and messaging dependency"
+            grep -q "apply plugin: \"com.google.gms.google-services\"" "$APP_GRADLE" || echo "apply plugin: \"com.google.gms.google-services\"" >> "$APP_GRADLE"
+            grep -q "com.google.gms:google-services" "$PROJ_GRADLE" || sed -i "s/dependencies {/dependencies\n        classpath 'com.google.gms:google-services:4.4.2'/" "$PROJ_GRADLE"
+            mkdir -p rider/android/app/src/main/java/com/hayyaride/rider
+            cat > rider/android/app/src/main/java/com/hayyaride/rider/MyFirebaseService.java <<'EOF'
+            package com.hayyaride.rider;
+            import android.os.Handler;
+            import android.os.Looper;
+            import android.widget.Toast;
+            import android.util.Log;
+            import com.google.firebase.messaging.FirebaseMessagingService;
+            public class MyFirebaseService extends FirebaseMessagingService {
+              @Override public void onNewToken(String token) {
+                Log.d("FCM_TOKEN", token);
+                new Handler(Looper.getMainLooper()).post(() ->
+                  Toast.makeText(getApplicationContext(), "FCM: "+token, Toast.LENGTH_LONG).show()
+                );
+              }
+            }
+            EOF
+            # Ensure firebase messaging dependency (append a small block)
+            cat >> "$APP_GRADLE" <<'EOF'
+            
+            dependencies {
+              implementation platform('com.google.firebase:firebase-bom:33.7.0')
+              implementation 'com.google.firebase:firebase-messaging'
+            }
+            EOF
+            # Also ensure service entry if manifest exists
+            if [ -f "$MF" ] && ! grep -q 'MyFirebaseService' "$MF"; then
+              sed -i "/<application/a \\    <service android:name=\".MyFirebaseService\" android:exported=\"false\">\\n        <intent-filter>\\n            <action android:name=\"com.google.firebase.MESSAGING_EVENT\" \/>\\n        <\/intent-filter>\\n    <\/service>" "$MF"
+            fi
+          else
+            echo "No google-services.json for Rider; disabling Firebase plugin to avoid build failure"
+            # Remove plugin application lines if present (both apply and plugins DSL)
+            sed -i "/apply plugin: \"com.google.gms.google-services\"/d" "$APP_GRADLE" || true
+            sed -i "/id ['\"]com.google.gms.google-services['\"]/d" "$APP_GRADLE" || true
+            # Remove classpath if present
+            sed -i "/com.google.gms:google-services/d" "$PROJ_GRADLE" || true
+          fi
 
       - name: Inject google-services.json and maps key (Driver)
+        if: ${{ hashFiles('driver/android/app/src/main/AndroidManifest.xml') != '' }}
         env:
           ANDROID_MAPS_KEY: ${{ github.event.inputs.android_maps_key || secrets.ANDROID_MAPS_DEV_KEY }}
         run: |
           test -n "$ANDROID_MAPS_KEY"
           mkdir -p driver/android/app
+          # Prefer downloaded config; otherwise fall back to repo copy if present
           if [ -f firebase-configs/google-services-com.hayyaride.driver.json ]; then
             cp firebase-configs/google-services-com.hayyaride.driver.json driver/android/app/google-services.json
+          elif [ -f deploy/outputs/firebase_configs/google-services-com.hayyaride.driver.json ]; then
+            cp deploy/outputs/firebase_configs/google-services-com.hayyaride.driver.json driver/android/app/google-services.json
           fi
           mkdir -p driver/android/app/src/main/res/values
           cat > driver/android/app/src/main/res/values/google_maps_api.xml <<EOF
@@ -172,47 +222,59 @@ jobs:
             <string name="google_maps_key" translatable="false">$ANDROID_MAPS_KEY</string>
           </resources>
           EOF
-          mkdir -p driver/android/app/src/main/java/com/hayyaride/driver
-          cat > driver/android/app/src/main/java/com/hayyaride/driver/MyFirebaseService.java <<'EOF'
-          package com.hayyaride.driver;
-          import android.os.Handler;
-          import android.os.Looper;
-          import android.widget.Toast;
-          import android.util.Log;
-          import com.google.firebase.messaging.FirebaseMessagingService;
-          public class MyFirebaseService extends FirebaseMessagingService {
-            @Override public void onNewToken(String token) {
-              Log.d("FCM_TOKEN", token);
-              new Handler(Looper.getMainLooper()).post(() ->
-                Toast.makeText(getApplicationContext(), "FCM: "+token, Toast.LENGTH_LONG).show()
-              );
-            }
-          }
-          EOF
           MF=driver/android/app/src/main/AndroidManifest.xml
-          if ! grep -q 'com.google.android.geo.API_KEY' "$MF"; then
-            sed -i "/<application/a \\    <meta-data android:name=\"com.google.android.geo.API_KEY\" android:value=\"@string/google_maps_key\" \/>" "$MF"
-          fi
-          if ! grep -q 'MyFirebaseService' "$MF"; then
-            sed -i "/<application/a \\    <service android:name=\".MyFirebaseService\" android:exported=\"false\">\\n        <intent-filter>\\n            <action android:name=\"com.google.firebase.MESSAGING_EVENT\" \/>\\n        <\/intent-filter>\\n    <\/service>" "$MF"
+          if [ -f "$MF" ]; then
+            if ! grep -q 'com.google.android.geo.API_KEY' "$MF"; then
+              sed -i "/<application/a \\    <meta-data android:name=\"com.google.android.geo.API_KEY\" android:value=\"@string/google_maps_key\" \/>" "$MF"
+            fi
           fi
           APP_GRADLE=driver/android/app/build.gradle
           PROJ_GRADLE=driver/android/build.gradle
-          grep -q "apply plugin: \"com.google.gms.google-services\"" "$APP_GRADLE" || echo "apply plugin: \"com.google.gms.google-services\"" >> "$APP_GRADLE"
-          grep -q "com.google.gms:google-services" "$PROJ_GRADLE" || sed -i "s/dependencies {/dependencies\n        classpath 'com.google.gms:google-services:4.4.2'/" "$PROJ_GRADLE"
-          cat >> "$APP_GRADLE" <<'EOF'
-          
-          dependencies {
-            implementation platform('com.google.firebase:firebase-bom:33.7.0')
-            implementation 'com.google.firebase:firebase-messaging'
-          }
-          EOF
+          if [ -f driver/android/app/google-services.json ]; then
+            echo "google-services.json found for Driver; enabling Firebase plugin and messaging dependency"
+            grep -q "apply plugin: \"com.google.gms.google-services\"" "$APP_GRADLE" || echo "apply plugin: \"com.google.gms.google-services\"" >> "$APP_GRADLE"
+            grep -q "com.google.gms:google-services" "$PROJ_GRADLE" || sed -i "s/dependencies {/dependencies\n        classpath 'com.google.gms:google-services:4.4.2'/" "$PROJ_GRADLE"
+            mkdir -p driver/android/app/src/main/java/com/hayyaride/driver
+            cat > driver/android/app/src/main/java/com/hayyaride/driver/MyFirebaseService.java <<'EOF'
+            package com.hayyaride.driver;
+            import android.os.Handler;
+            import android.os.Looper;
+            import android.widget.Toast;
+            import android.util.Log;
+            import com.google.firebase.messaging.FirebaseMessagingService;
+            public class MyFirebaseService extends FirebaseMessagingService {
+              @Override public void onNewToken(String token) {
+                Log.d("FCM_TOKEN", token);
+                new Handler(Looper.getMainLooper()).post(() ->
+                  Toast.makeText(getApplicationContext(), "FCM: "+token, Toast.LENGTH_LONG).show()
+                );
+              }
+            }
+            EOF
+            cat >> "$APP_GRADLE" <<'EOF'
+            
+            dependencies {
+              implementation platform('com.google.firebase:firebase-bom:33.7.0')
+              implementation 'com.google.firebase:firebase-messaging'
+            }
+            EOF
+            if [ -f "$MF" ] && ! grep -q 'MyFirebaseService' "$MF"; then
+              sed -i "/<application/a \\    <service android:name=\".MyFirebaseService\" android:exported=\"false\">\\n        <intent-filter>\\n            <action android:name=\"com.google.firebase.MESSAGING_EVENT\" \/>\\n        <\/intent-filter>\\n    <\/service>" "$MF"
+            fi
+          else
+            echo "No google-services.json for Driver; disabling Firebase plugin to avoid build failure"
+            sed -i "/apply plugin: \"com.google.gms.google-services\"/d" "$APP_GRADLE" || true
+            sed -i "/id ['\"]com.google.gms.google-services['\"]/d" "$APP_GRADLE" || true
+            sed -i "/com.google.gms:google-services/d" "$PROJ_GRADLE" || true
+          fi
 
       - name: Build Rider APK (debug)
+        if: ${{ hashFiles('rider/pubspec.yaml') != '' }}
         working-directory: rider
         run: flutter build apk --debug
 
       - name: Build Driver APK (debug)
+        if: ${{ hashFiles('driver/pubspec.yaml') != '' }}
         working-directory: driver
         run: flutter build apk --debug
 
@@ -223,3 +285,4 @@ jobs:
           path: |
             rider/build/app/outputs/flutter-apk/app-debug.apk
             driver/build/app/outputs/flutter-apk/app-debug.apk
+          if-no-files-found: ignore
