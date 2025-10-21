@@ -38,18 +38,19 @@ jobs:
       - name: Determine available secrets
         id: secrets
         run: |
-          has_vps=$([ -n "${{ secrets.VPS_PASSWORD }}" ] && echo true || echo false)
-          has_gcp=$([ -n "${{ secrets.GCP_SA_KEY_JSON }}" ] && echo true || echo false)
-          echo "has_vps=$has_vps" >> "$GITHUB_OUTPUT"
-          echo "has_gcp=$has_gcp" >> "$GITHUB_OUTPUT"
+          echo "has_vps=${{ secrets.VPS_PASSWORD != '' }}" >> "$GITHUB_OUTPUT"
+          echo "has_gcp=${{ secrets.GCP_SA_KEY_JSON != '' }}" >> "$GITHUB_OUTPUT"
 
       - name: Install tooling (sshpass, rsync)
         run: sudo apt-get update && sudo apt-get install -y rsync openssh-client sshpass jq
 
       - name: Add VPS host to known_hosts
+        if: ${{ steps.secrets.outputs.has_vps == 'true' }}
+        env:
+          VPS_HOST: ${{ github.event.inputs.vps_host || '159.198.36.105' }}
         run: |
           mkdir -p ~/.ssh
-          ssh-keyscan -p 22 ${{ github.event.inputs.vps_host }} >> ~/.ssh/known_hosts
+          ssh-keyscan -p 22 "$VPS_HOST" >> ~/.ssh/known_hosts
 
       - name: Rsync Rider and Driver projects from VPS
         if: ${{ steps.secrets.outputs.has_vps == 'true' }}
