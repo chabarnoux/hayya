@@ -226,11 +226,11 @@ jobs:
           fi
           if [ -n "$ANDROID_MAPS_KEY" ]; then
             mkdir -p rider/android/app/src/main/res/values
-            cat > rider/android/app/src/main/res/values/google_maps_api.xml <<EOF
-            <resources>
-              <string name="google_maps_key" translatable="false">$ANDROID_MAPS_KEY</string>
-            </resources>
-            EOF
+            cat > rider/android/app/src/main/res/values/google_maps_api.xml <<'EOF'
+<resources>
+  <string name="google_maps_key" translatable="false">$ANDROID_MAPS_KEY</string>
+</resources>
+EOF
           else
             echo "ANDROID_MAPS_KEY not set; skipping maps key XML injection"
           fi
@@ -302,11 +302,11 @@ jobs:
           fi
           if [ -n "$ANDROID_MAPS_KEY" ]; then
             mkdir -p driver/android/app/src/main/res/values
-            cat > driver/android/app/src/main/res/values/google_maps_api.xml <<EOF
-            <resources>
-              <string name="google_maps_key" translatable="false">$ANDROID_MAPS_KEY</string>
-            </resources>
-            EOF
+            cat > driver/android/app/src/main/res/values/google_maps_api.xml <<'EOF'
+<resources>
+  <string name="google_maps_key" translatable="false">$ANDROID_MAPS_KEY</string>
+</resources>
+EOF
           else
             echo "ANDROID_MAPS_KEY not set; skipping maps key XML injection"
           fi
