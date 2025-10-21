@@ -55,6 +55,48 @@ jobs:
           sshpass -e rsync -a --delete ${{ github.event.inputs.vps_user }}@${{ github.event.inputs.vps_host }}:${{ github.event.inputs.app_rider_path }}/ ./rider/
           sshpass -e rsync -a --delete ${{ github.event.inputs.vps_user }}@${{ github.event.inputs.vps_host }}:${{ github.event.inputs.app_driver_path }}/ ./driver/
 
+      - name: Enforce collection 1.18.0 override (Rider & Driver)
+        run: |
+          set -euo pipefail
+          for APP in rider driver; do
+            FILE="$APP/pubspec.yaml"
+            if [ -f "$FILE" ]; then
+              echo "Processing $FILE"
+              if ! grep -q '^dependency_overrides:' "$FILE"; then
+                printf "\ndependency_overrides:\n  collection: 1.18.0\n" >> "$FILE"
+              else
+                awk '
+                function lspace(s,    i,n,c){ n=0; for(i=1;i<=length(s);i++){ c=substr(s,i,1); if(c==" ") n++; else break } return n }
+                function indent(n,   out,i){ out=""; for(i=0;i<n;i++) out=out " "; return out }
+                {
+                  curr_indent = lspace($0);
+                  if (in_overrides && curr_indent <= base_indent && !inserted) {
+                    print indent(base_indent+2) "collection: 1.18.0"
+                    in_overrides=0
+                  }
+                  if ($0 ~ /^dependency_overrides:[[:space:]]*$/) {
+                    print
+                    in_overrides=1; inserted=0; base_indent=curr_indent
+                    next
+                  }
+                  if (in_overrides && $0 ~ /^[[:space:]]*collection:[[:space:]]*/) {
+                    print indent(base_indent+2) "collection: 1.18.0"
+                    inserted=1
+                    next
+                  }
+                  print
+                }
+                END{
+                  if (in_overrides && !inserted) {
+                    print indent(base_indent+2) "collection: 1.18.0"
+                  }
+                }' "$FILE" > "$FILE.tmp" && mv "$FILE.tmp" "$FILE"
+              fi
+              echo "--- tail of $FILE ---"
+              tail -n 60 "$FILE" || true
+            fi
+          done
+
       - name: Authenticate to Google Cloud
         if: ${{ steps.secrets.outputs.has_gcp == 'true' }}
         uses: google-github-actions/auth@v2
@@ -124,6 +166,7 @@ jobs:
         run: |
           flutter --version
           dart --version
+          flutter clean
           flutter pub get
 
       - name: Flutter pub get (Driver)
@@ -132,6 +175,7 @@ jobs:
         run: |
           flutter --version
           dart --version
+          flutter clean
           flutter pub get
 
       - name: Inject google-services.json and maps key (Rider)
