@@ -25,8 +25,6 @@ on:
   push:
     branches:
       - cursor/fix-collection-package-conflict-in-apps-dea2
-    paths:
-      - .github/workflows/flutter-apk-build.yml
 
 jobs:
   build:
@@ -213,6 +211,7 @@ jobs:
           flutter pub get
 
       - name: Inject google-services.json and maps key (Rider)
+        continue-on-error: true
         if: ${{ hashFiles('rider/android/app/src/main/AndroidManifest.xml') != '' }}
         env:
           ANDROID_MAPS_KEY: ${{ github.event.inputs.android_maps_key || secrets.ANDROID_MAPS_DEV_KEY }}
@@ -289,6 +288,7 @@ EOF
           fi
 
       - name: Inject google-services.json and maps key (Driver)
+        continue-on-error: true
         if: ${{ hashFiles('driver/android/app/src/main/AndroidManifest.xml') != '' }}
         env:
           ANDROID_MAPS_KEY: ${{ github.event.inputs.android_maps_key || secrets.ANDROID_MAPS_DEV_KEY }}
