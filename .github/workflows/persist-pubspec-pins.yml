@@ -1,0 +1,127 @@
+name: Persist pubspec pins on VPS
+
+on:
+  workflow_dispatch:
+    inputs:
+      vps_host:
+        description: 'VPS host'
+        required: true
+        default: '159.198.36.105'
+      vps_user:
+        description: 'VPS user'
+        required: true
+        default: 'root'
+      app_rider_path:
+        description: 'Absolute path to rider Flutter app on VPS'
+        required: true
+        default: '/var/www/tagxi/appsrc/Main-File-August-20/flutter_user/flutter_user'
+      app_driver_path:
+        description: 'Absolute path to driver Flutter app on VPS'
+        required: true
+        default: '/var/www/tagxi/appsrc/Main-File-August-20/flutter_driver/flutter_driver'
+      branch_name:
+        description: 'Branch to create in app repos (if git detected)'
+        required: false
+        default: 'chore/persist-pubspec-pins-dart35'
+      commit_message:
+        description: 'Commit message for pubspec.yaml edits'
+        required: false
+        default: 'chore(pubspec): pin collection 1.18.0 and Dart 3.5-compatible deps'
+  push:
+    branches:
+      - cursor/fix-collection-package-conflict-in-apps-dea2
+
+jobs:
+  persist:
+    if: "contains(github.event.head_commit.message, '[persist]') || github.event_name == 'workflow_dispatch'"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install tooling (sshpass, rsync)
+        run: sudo apt-get update && sudo apt-get install -y rsync openssh-client sshpass jq
+
+      - name: Add VPS host to known_hosts
+        env:
+          VPS_HOST: ${{ github.event.inputs.vps_host || '159.198.36.105' }}
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan -p 22 "$VPS_HOST" >> ~/.ssh/known_hosts
+
+      - name: Fetch pubspecs from VPS
+        env:
+          SSHPASS: ${{ secrets.VPS_PASSWORD }}
+          VPS_HOST: ${{ github.event.inputs.vps_host || '159.198.36.105' }}
+          VPS_USER: ${{ github.event.inputs.vps_user || 'root' }}
+          RIDER_PATH: ${{ github.event.inputs.app_rider_path || '/var/www/tagxi/appsrc/Main-File-August-20/flutter_user/flutter_user' }}
+          DRIVER_PATH: ${{ github.event.inputs.app_driver_path || '/var/www/tagxi/appsrc/Main-File-August-20/flutter_driver/flutter_driver' }}
+        run: |
+          set -euo pipefail
+          test -n "$SSHPASS"
+          sshpass -e scp -o StrictHostKeyChecking=no "$VPS_USER@$VPS_HOST:$RIDER_PATH/pubspec.yaml" rider_pubspec.yaml
+          sshpass -e scp -o StrictHostKeyChecking=no "$VPS_USER@$VPS_HOST:$DRIVER_PATH/pubspec.yaml" driver_pubspec.yaml
+
+      - name: Edit rider pubspec (collection override)
+        run: |
+          set -euo pipefail
+          FILE="rider_pubspec.yaml"
+          if ! grep -q '^dependency_overrides:' "$FILE"; then
+            printf "\ndependency_overrides:\n  collection: 1.18.0\n" >> "$FILE"
+          else
+            awk '
+            function lspace(s,    i,n,c){ n=0; for(i=1;i<=length(s);i++){ c=substr(s,i,1); if(c==" ") n++; else break } return n }
+            function indent(n,   out,i){ out=""; for(i=0;i<n;i++) out=out " "; return out }
+            {
+              curr_indent = lspace($0);
+              if (in_overrides && curr_indent <= base_indent && !inserted) { print indent(base_indent+2) "collection: 1.18.0"; in_overrides=0 }
+              if ($0 ~ /^dependency_overrides:[[:space:]]*$/) { print; in_overrides=1; inserted=0; base_indent=curr_indent; next }
+              if (in_overrides && $0 ~ /^[[:space:]]*collection:[[:space:]]*/) { print indent(base_indent+2) "collection: 1.18.0"; inserted=1; next }
+              print
+            }
+            END{ if (in_overrides && !inserted) print indent(base_indent+2) "collection: 1.18.0" }' "$FILE" > "$FILE.tmp" && mv "$FILE.tmp" "$FILE"
+          fi
+
+      - name: Edit driver pubspec (collection override + pins)
+        run: |
+          set -euo pipefail
+          FILE="driver_pubspec.yaml"
+          if ! grep -q '^dependency_overrides:' "$FILE"; then
+            printf "\ndependency_overrides:\n  collection: 1.18.0\n" >> "$FILE"
+          else
+            awk '
+            function lspace(s,    i,n,c){ n=0; for(i=1;i<=length(s);i++){ c=substr(s,i,1); if(c==" ") n++; else break } return n }
+            function indent(n,   out,i){ out=""; for(i=0;i<n;i++) out=out " "; return out }
+            {
+              curr_indent = lspace($0);
+              if (in_overrides && curr_indent <= base_indent && !inserted) { print indent(base_indent+2) "collection: 1.18.0"; in_overrides=0 }
+              if ($0 ~ /^dependency_overrides:[[:space:]]*$/) { print; in_overrides=1; inserted=0; base_indent=curr_indent; next }
+              if (in_overrides && $0 ~ /^[[:space:]]*collection:[[:space:]]*/) { print indent(base_indent+2) "collection: 1.18.0"; inserted=1; next }
+              print
+            }
+            END{ if (in_overrides && !inserted) print indent(base_indent+2) "collection: 1.18.0" }' "$FILE" > "$FILE.tmp" && mv "$FILE.tmp" "$FILE"
+          fi
+          sed -i -E 's/^([[:space:]]*location:[[:space:]])\^?8[[:digit:].-]*/\1^7.0.0/' "$FILE"
+          sed -i -E 's/^([[:space:]]*flutter_map:[[:space:]])\^?8[[:digit:].-]*/\1^7.0.0/' "$FILE"
+
+      - name: Diff edited files
+        run: |
+          echo "--- rider diff ---"; diff -u <(cat rider_pubspec.yaml) <(cat rider_pubspec.yaml) || true
+          echo "--- driver diff ---"; diff -u <(cat driver_pubspec.yaml) <(cat driver_pubspec.yaml) || true
+
+      - name: Push changes back to VPS and commit
+        env:
+          SSHPASS: ${{ secrets.VPS_PASSWORD }}
+          VPS_HOST: ${{ github.event.inputs.vps_host || '159.198.36.105' }}
+          VPS_USER: ${{ github.event.inputs.vps_user || 'root' }}
+          RIDER_PATH: ${{ github.event.inputs.app_rider_path || '/var/www/tagxi/appsrc/Main-File-August-20/flutter_user/flutter_user' }}
+          DRIVER_PATH: ${{ github.event.inputs.app_driver_path || '/var/www/tagxi/appsrc/Main-File-August-20/flutter_driver/flutter_driver' }}
+          BRANCH_NAME: ${{ github.event.inputs.branch_name || 'chore/persist-pubspec-pins-dart35' }}
+          COMMIT_MSG: ${{ github.event.inputs.commit_message || 'chore(pubspec): pin collection 1.18.0 and Dart 3.5-compatible deps' }}
+        run: |
+          set -euo pipefail
+          sshpass -e scp -o StrictHostKeyChecking=no rider_pubspec.yaml "$VPS_USER@$VPS_HOST:$RIDER_PATH/pubspec.yaml"
+          sshpass -e scp -o StrictHostKeyChecking=no driver_pubspec.yaml "$VPS_USER@$VPS_HOST:$DRIVER_PATH/pubspec.yaml"
+
+          sshpass -e ssh -o StrictHostKeyChecking=no "$VPS_USER@$VPS_HOST" bash -lc "cd '$RIDER_PATH' && if [ -d .git ]; then git checkout -B '$BRANCH_NAME' && git add pubspec.yaml && (git commit -m '$COMMIT_MSG' || true) && (git push -u origin '$BRANCH_NAME' || true); else echo 'Not a git repo: $RIDER_PATH'; fi"
+          sshpass -e ssh -o StrictHostKeyChecking=no "$VPS_USER@$VPS_HOST" bash -lc "cd '$DRIVER_PATH' && if [ -d .git ]; then git checkout -B '$BRANCH_NAME' && git add pubspec.yaml && (git commit -m '$COMMIT_MSG' || true) && (git push -u origin '$BRANCH_NAME' || true); else echo 'Not a git repo: $DRIVER_PATH'; fi"
