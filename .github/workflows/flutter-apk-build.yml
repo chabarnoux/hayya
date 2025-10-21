@@ -121,6 +121,10 @@ jobs:
             if grep -Eq '^\s*location:\s*\^?8' "$FILE"; then
               sed -i -E 's/^([[:space:]]*location:[[:space:]])\^?8[[:digit:].-]*/\1^7.0.0/' "$FILE"
             fi
+            # If flutter_map >=8 is requested, pin to ^7.0.0 for Dart 3.5.3 compatibility
+            if grep -Eq '^\s*flutter_map:\s*\^?8' "$FILE"; then
+              sed -i -E 's/^([[:space:]]*flutter_map:[[:space:]])\^?8[[:digit:].-]*/\1^7.0.0/' "$FILE"
+            fi
             echo "--- pubspec diff (location pin) for $FILE ---"
             git --no-pager diff --no-index -- "$FILE.orig2" "$FILE" || true
             echo "--- tail of $FILE (post-pin) ---"
