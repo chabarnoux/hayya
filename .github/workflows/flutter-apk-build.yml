@@ -4,31 +4,34 @@ on:
   workflow_dispatch:
     inputs:
       vps_host:
-        description: 'VPS host'
+        description: "VPS host"
         required: true
-        default: '159.198.36.105'
+        default: "159.198.36.105"
       vps_user:
-        description: 'VPS user'
+        description: "VPS user"
         required: true
-        default: 'root'
+        default: "root"
       app_rider_path:
-        description: 'Absolute path to rider Flutter app on VPS'
+        description: "Absolute path to rider Flutter app on VPS"
         required: true
-        default: '/var/www/tagxi/appsrc/Main-File-August-20/flutter_user/flutter_user'
+        default: "/var/www/tagxi/appsrc/Main-File-August-20/flutter_user/flutter_user"
       app_driver_path:
-        description: 'Absolute path to driver Flutter app on VPS'
+        description: "Absolute path to driver Flutter app on VPS"
         required: true
-        default: '/var/www/tagxi/appsrc/Main-File-August-20/flutter_driver/flutter_driver'
+        default: "/var/www/tagxi/appsrc/Main-File-August-20/flutter_driver/flutter_driver"
       android_maps_key:
-        description: 'Android Maps API key (dev) - optional if secret provided'
+        description: "Android Maps API key (dev) - optional if secret provided"
         required: false
-
 
 jobs:
   build:
+    name: Build APKs
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Determine available secrets
@@ -53,373 +56,50 @@ jobs:
         env:
           SSHPASS: ${{ secrets.VPS_PASSWORD }}
         run: |
-          test -n "$SSHPASS"
-          VPS_HOST="${{ github.event.inputs.vps_host || '159.198.36.105' }}"
-          VPS_USER="${{ github.event.inputs.vps_user || 'root' }}"
-          RIDER_PATH="${{ github.event.inputs.app_rider_path || '/var/www/tagxi/appsrc/Main-File-August-20/flutter_user/flutter_user' }}"
-          DRIVER_PATH="${{ github.event.inputs.app_driver_path || '/var/www/tagxi/appsrc/Main-File-August-20/flutter_driver/flutter_driver' }}"
-          echo "Using VPS ${VPS_USER}@${VPS_HOST}"
+          set -e
+          VPS_HOST="${{ github.event.inputs.vps_host }}"
+          VPS_USER="${{ github.event.inputs.vps_user }}"
+          RIDER_PATH="${{ github.event.inputs.app_rider_path }}"
+          DRIVER_PATH="${{ github.event.inputs.app_driver_path }}"
+          echo "Syncing from ${VPS_USER}@${VPS_HOST}"
           sshpass -e rsync -a --delete "${VPS_USER}@${VPS_HOST}:${RIDER_PATH}/" ./rider/
           sshpass -e rsync -a --delete "${VPS_USER}@${VPS_HOST}:${DRIVER_PATH}/" ./driver/
-
-      - name: Persist pubspec pins on VPS (commit & push)
-        if: ${{ steps.secrets.outputs.has_vps == 'true' }}
-        env:
-          SSHPASS: ${{ secrets.VPS_PASSWORD }}
-        run: |
-          set -euo pipefail
-          VPS_HOST="${{ github.event.inputs.vps_host || '159.198.36.105' }}"
-          VPS_USER="${{ github.event.inputs.vps_user || 'root' }}"
-          RIDER_PATH="${{ github.event.inputs.app_rider_path || '/var/www/tagxi/appsrc/Main-File-August-20/flutter_user/flutter_user' }}"
-          DRIVER_PATH="${{ github.event.inputs.app_driver_path || '/var/www/tagxi/appsrc/Main-File-August-20/flutter_driver/flutter_driver' }}"
-          BRANCH_NAME="chore/persist-pubspec-pins-dart35"
-          COMMIT_MSG="chore(pubspec): pin collection 1.18.0 and Dart 3.5-compatible deps"
-
-          ssh_cmd() { sshpass -e ssh -o StrictHostKeyChecking=no "$VPS_USER@$VPS_HOST" "$@"; }
-
-          edit_pubspec() {
-            local APP_PATH="$1"; local IS_DRIVER="$2";
-            ssh_cmd "bash -lc 'test -f "$APP_PATH/pubspec.yaml"'"
-            ssh_cmd "bash -lc 'cp "$APP_PATH/pubspec.yaml" "$APP_PATH/pubspec.yaml.bak" || true'"
-
-            # Ensure dependency_overrides: collection: 1.18.0
-            ssh_cmd "bash -lc 'if ! grep -q "^dependency_overrides:" "$APP_PATH/pubspec.yaml"; then printf "\ndependency_overrides:\n  collection: 1.18.0\n" >> "$APP_PATH/pubspec.yaml"; else awk '\''
-              function lspace(s,    i,n,c){ n=0; for(i=1;i<=length(s);i++){ c=substr(s,i,1); if(c==" ") n++; else break } return n }
-              function indent(n,   out,i){ out=""; for(i=0;i<n;i++) out=out " "; return out }
-              {
-                curr_indent = lspace($0);
-                if (in_overrides && curr_indent <= base_indent && !inserted) {
-                  print indent(base_indent+2) "collection: 1.18.0"; in_overrides=0
-                }
-                if ($0 ~ /^dependency_overrides:[[:space:]]*$/) { print; in_overrides=1; inserted=0; base_indent=curr_indent; next }
-                if (in_overrides && $0 ~ /^[[:space:]]*collection:[[:space:]]*/) { print indent(base_indent+2) "collection: 1.18.0"; inserted=1; next }
-                print
-              }
-              END{ if (in_overrides && !inserted) print indent(base_indent+2) "collection: 1.18.0" }'\'' "$APP_PATH/pubspec.yaml" > "$APP_PATH/pubspec.yaml.tmp" && mv "$APP_PATH/pubspec.yaml.tmp" "$APP_PATH/pubspec.yaml"; fi'"
-
-            # Driver-only pins for Dart 3.5.x
-            if [ "$IS_DRIVER" = "1" ]; then
-              ssh_cmd "bash -lc 'sed -i -E "s/^([[:space:]]*location:[[:space:]])\^?8[[:digit:].-]*/\1^7.0.0/" "$APP_PATH/pubspec.yaml"'"
-              ssh_cmd "bash -lc 'sed -i -E "s/^([[:space:]]*flutter_map:[[:space:]])\^?8[[:digit:].-]*/\1^7.0.0/" "$APP_PATH/pubspec.yaml"'"
-            fi
-
-            ssh_cmd "bash -lc 'diff -u "$APP_PATH/pubspec.yaml.bak" "$APP_PATH/pubspec.yaml" || true'"
-
-            # Commit & push if git repo
-            if ssh_cmd "bash -lc 'cd "$APP_PATH" && git rev-parse --is-inside-work-tree >/dev/null 2>&1'"; then
-              ssh_cmd "bash -lc 'cd "$APP_PATH" && git checkout -B "$BRANCH_NAME"'" || true
-              ssh_cmd "bash -lc 'cd "$APP_PATH" && git add pubspec.yaml'"
-              ssh_cmd "bash -lc 'cd "$APP_PATH" && git commit -m "$COMMIT_MSG" || true'"
-              ssh_cmd "bash -lc 'cd "$APP_PATH" && git push -u origin "$BRANCH_NAME" || true'"
-            fi
-          }
-
-          edit_pubspec "$RIDER_PATH" 0
-          edit_pubspec "$DRIVER_PATH" 1
-
-      - name: Enforce collection 1.18.0 override (Rider & Driver)
-        run: |
-          set -euo pipefail
-          for APP in rider driver; do
-            FILE="$APP/pubspec.yaml"
-            if [ -f "$FILE" ]; then
-              echo "Processing $FILE"
-              cp "$FILE" "$FILE.orig" || true
-              if ! grep -q '^dependency_overrides:' "$FILE"; then
-                printf "\ndependency_overrides:\n  collection: 1.18.0\n" >> "$FILE"
-              else
-                awk '
-                function lspace(s,    i,n,c){ n=0; for(i=1;i<=length(s);i++){ c=substr(s,i,1); if(c==" ") n++; else break } return n }
-                function indent(n,   out,i){ out=""; for(i=0;i<n;i++) out=out " "; return out }
-                {
-                  curr_indent = lspace($0);
-                  if (in_overrides && curr_indent <= base_indent && !inserted) {
-                    print indent(base_indent+2) "collection: 1.18.0"
-                    in_overrides=0
-                  }
-                  if ($0 ~ /^dependency_overrides:[[:space:]]*$/) {
-                    print
-                    in_overrides=1; inserted=0; base_indent=curr_indent
-                    next
-                  }
-                  if (in_overrides && $0 ~ /^[[:space:]]*collection:[[:space:]]*/) {
-                    print indent(base_indent+2) "collection: 1.18.0"
-                    inserted=1
-                    next
-                  }
-                  print
-                }
-                END{
-                  if (in_overrides && !inserted) {
-                    print indent(base_indent+2) "collection: 1.18.0"
-                  }
-                }' "$FILE" > "$FILE.tmp" && mv "$FILE.tmp" "$FILE"
-              fi
-              echo "--- pubspec diff for $FILE ---"
-              git --no-pager diff --no-index -- "$FILE.orig" "$FILE" || true
-              echo "--- tail of $FILE (post-edit) ---"
-              tail -n 60 "$FILE" || true
-            fi
-          done
-
-      - name: Pin incompatible packages for Dart 3.5 (Driver)
-        run: |
-          set -euo pipefail
-          FILE="driver/pubspec.yaml"
-          if [ -f "$FILE" ]; then
-            cp "$FILE" "$FILE.orig2" || true
-            # If location >=8 is requested, pin to ^7.0.0 for Dart 3.5.3 compatibility
-            if grep -Eq '^\s*location:\s*\^?8' "$FILE"; then
-              sed -i -E 's/^([[:space:]]*location:[[:space:]])\^?8[[:digit:].-]*/\1^7.0.0/' "$FILE"
-            fi
-            # If flutter_map >=8 is requested, pin to ^7.0.0 for Dart 3.5.3 compatibility
-            if grep -Eq '^\s*flutter_map:\s*\^?8' "$FILE"; then
-              sed -i -E 's/^([[:space:]]*flutter_map:[[:space:]])\^?8[[:digit:].-]*/\1^7.0.0/' "$FILE"
-            fi
-            echo "--- pubspec diff (location pin) for $FILE ---"
-            git --no-pager diff --no-index -- "$FILE.orig2" "$FILE" || true
-            echo "--- tail of $FILE (post-pin) ---"
-            tail -n 40 "$FILE" || true
-          fi
-
-      - name: Authenticate to Google Cloud
-        if: ${{ steps.secrets.outputs.has_gcp == 'true' }}
-        uses: google-github-actions/auth@v2
-        with:
-          credentials_json: ${{ secrets.GCP_SA_KEY_JSON }}
-
-      - name: Set up gcloud
-        if: ${{ steps.secrets.outputs.has_gcp == 'true' }}
-        uses: google-github-actions/setup-gcloud@v2
-
-      - name: Download google-services.json (Rider and Driver)
-        if: ${{ steps.secrets.outputs.has_gcp == 'true' }}
-        env:
-          PID: hayyaride
-        run: |
-          ACCESS_TOKEN=$(gcloud auth print-access-token)
-          mkdir -p firebase-configs
-          # Rider
-          RIDER_APP=$(curl -sS -H "Authorization: Bearer ${ACCESS_TOKEN}" "https://firebase.googleapis.com/v1beta1/projects/${PID}/androidApps" | jq -r '.apps[] | select(.packageName=="com.hayyaride.rider").name')
-          if [ -n "$RIDER_APP" ] && [ "$RIDER_APP" != "null" ]; then
-            curl -sS -H "Authorization: Bearer ${ACCESS_TOKEN}" "https://firebase.googleapis.com/v1beta1/${RIDER_APP}/config" | jq -r .configFileContents | base64 -d > firebase-configs/google-services-com.hayyaride.rider.json || true
-          fi
-          # Driver
-          DRIVER_APP=$(curl -sS -H "Authorization: Bearer ${ACCESS_TOKEN}" "https://firebase.googleapis.com/v1beta1/projects/${PID}/androidApps" | jq -r '.apps[] | select(.packageName=="com.hayyaride.driver").name')
-          if [ -n "$DRIVER_APP" ] && [ "$DRIVER_APP" != "null" ]; then
-            curl -sS -H "Authorization: Bearer ${ACCESS_TOKEN}" "https://firebase.googleapis.com/v1beta1/${DRIVER_APP}/config" | jq -r .configFileContents | base64 -d > firebase-configs/google-services-com.hayyaride.driver.json || true
-          fi
 
       - name: Set up Java
         uses: actions/setup-java@v4
         with:
-          distribution: 'temurin'
-          java-version: '17'
-
-      - name: Set Gradle and Java memory options
-        run: |
-          echo "GRADLE_OPTS=-Dorg.gradle.jvmargs=-Xmx3g -Dkotlin.daemon.jvm.options=-Xmx1024m" >> $GITHUB_ENV
-          echo "JAVA_TOOL_OPTIONS=-Xmx2g" >> $GITHUB_ENV
+          distribution: "temurin"
+          java-version: "17"
 
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.24.3'
-          channel: 'stable'
+          flutter-version: "3.24.3"
+          channel: "stable"
           cache: true
-
-      - name: Accept Android SDK licenses (best-effort)
-        run: |
-          if command -v sdkmanager >/dev/null 2>&1; then
-            yes | sdkmanager --licenses || true
-          elif [ -n "${ANDROID_SDK_ROOT:-}" ] && [ -x "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" ]; then
-            yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --licenses || true
-          else
-            echo "sdkmanager not found; skipping license acceptance"
-          fi
 
       - name: Flutter version
         run: |
-          command -v flutter
-          command -v dart
           flutter --version
           dart --version
 
       - name: Flutter pub get (Rider)
-        if: ${{ hashFiles('rider/pubspec.yaml') != '' }}
         working-directory: rider
         run: |
-          flutter --version
-          dart --version
           flutter clean
           flutter pub get
 
       - name: Flutter pub get (Driver)
-        if: ${{ hashFiles('driver/pubspec.yaml') != '' }}
         working-directory: driver
         run: |
-          flutter --version
-          dart --version
           flutter clean
           flutter pub get
 
-      - name: Inject google-services.json and maps key (Rider)
-        continue-on-error: true
-        if: ${{ hashFiles('rider/android/app/src/main/AndroidManifest.xml') != '' }}
-        env:
-          ANDROID_MAPS_KEY: ${{ github.event.inputs.android_maps_key || secrets.ANDROID_MAPS_DEV_KEY }}
-        run: |
-          mkdir -p rider/android/app
-          # Prefer downloaded config; otherwise fall back to repo copy if present
-          if [ -f firebase-configs/google-services-com.hayyaride.rider.json ]; then
-            cp firebase-configs/google-services-com.hayyaride.rider.json rider/android/app/google-services.json
-          elif [ -f deploy/outputs/firebase_configs/google-services-com.hayyaride.rider.json ]; then
-            cp deploy/outputs/firebase_configs/google-services-com.hayyaride.rider.json rider/android/app/google-services.json
-          fi
-          if [ -n "$ANDROID_MAPS_KEY" ]; then
-            mkdir -p rider/android/app/src/main/res/values
-            cat > rider/android/app/src/main/res/values/google_maps_api.xml <<'EOF'
-<resources>
-  <string name="google_maps_key" translatable="false">$ANDROID_MAPS_KEY</string>
-</resources>
-EOF
-          else
-            echo "ANDROID_MAPS_KEY not set; skipping maps key XML injection"
-          fi
-          MF=rider/android/app/src/main/AndroidManifest.xml
-          if [ -f "$MF" ]; then
-            if [ -n "$ANDROID_MAPS_KEY" ]; then
-              if ! grep -q 'com.google.android.geo.API_KEY' "$MF"; then
-                sed -i "/<application/a \\    <meta-data android:name=\"com.google.android.geo.API_KEY\" android:value=\"@string/google_maps_key\" \/>" "$MF"
-              fi
-            else
-              echo "ANDROID_MAPS_KEY not set; skipping manifest meta-data injection"
-            fi
-          fi
-          APP_GRADLE=rider/android/app/build.gradle
-          PROJ_GRADLE=rider/android/build.gradle
-          if [ -f rider/android/app/google-services.json ]; then
-            echo "google-services.json found for Rider; enabling Firebase plugin and messaging dependency"
-            grep -q "apply plugin: \"com.google.gms.google-services\"" "$APP_GRADLE" || echo "apply plugin: \"com.google.gms.google-services\"" >> "$APP_GRADLE"
-            grep -q "com.google.gms:google-services" "$PROJ_GRADLE" || sed -i "s/dependencies {/dependencies\n        classpath 'com.google.gms:google-services:4.4.2'/" "$PROJ_GRADLE"
-            mkdir -p rider/android/app/src/main/java/com/hayyaride/rider
-            cat > rider/android/app/src/main/java/com/hayyaride/rider/MyFirebaseService.java <<'EOF'
-            package com.hayyaride.rider;
-            import android.os.Handler;
-            import android.os.Looper;
-            import android.widget.Toast;
-            import android.util.Log;
-            import com.google.firebase.messaging.FirebaseMessagingService;
-            public class MyFirebaseService extends FirebaseMessagingService {
-              @Override public void onNewToken(String token) {
-                Log.d("FCM_TOKEN", token);
-                new Handler(Looper.getMainLooper()).post(() ->
-                  Toast.makeText(getApplicationContext(), "FCM: "+token, Toast.LENGTH_LONG).show()
-                );
-              }
-            }
-            EOF
-            # Ensure firebase messaging dependency (append a small block)
-            cat >> "$APP_GRADLE" <<'EOF'
-            
-            dependencies {
-              implementation platform('com.google.firebase:firebase-bom:33.7.0')
-              implementation 'com.google.firebase:firebase-messaging'
-            }
-            EOF
-            # Also ensure service entry if manifest exists
-            if [ -f "$MF" ] && ! grep -q 'MyFirebaseService' "$MF"; then
-              sed -i "/<application/a \\    <service android:name=\".MyFirebaseService\" android:exported=\"false\">\\n        <intent-filter>\\n            <action android:name=\"com.google.firebase.MESSAGING_EVENT\" \/>\\n        <\/intent-filter>\\n    <\/service>" "$MF"
-            fi
-          else
-            echo "No google-services.json for Rider; disabling Firebase plugin to avoid build failure"
-            # Remove plugin application lines if present (both apply and plugins DSL)
-            sed -i "/apply plugin: \"com.google.gms.google-services\"/d" "$APP_GRADLE" || true
-            sed -i "/id ['\"]com.google.gms.google-services['\"]/d" "$APP_GRADLE" || true
-            # Remove classpath if present
-            sed -i "/com.google.gms:google-services/d" "$PROJ_GRADLE" || true
-          fi
-
-      - name: Inject google-services.json and maps key (Driver)
-        continue-on-error: true
-        if: ${{ hashFiles('driver/android/app/src/main/AndroidManifest.xml') != '' }}
-        env:
-          ANDROID_MAPS_KEY: ${{ github.event.inputs.android_maps_key || secrets.ANDROID_MAPS_DEV_KEY }}
-        run: |
-          mkdir -p driver/android/app
-          # Prefer downloaded config; otherwise fall back to repo copy if present
-          if [ -f firebase-configs/google-services-com.hayyaride.driver.json ]; then
-            cp firebase-configs/google-services-com.hayyaride.driver.json driver/android/app/google-services.json
-          elif [ -f deploy/outputs/firebase_configs/google-services-com.hayyaride.driver.json ]; then
-            cp deploy/outputs/firebase_configs/google-services-com.hayyaride.driver.json driver/android/app/google-services.json
-          fi
-          if [ -n "$ANDROID_MAPS_KEY" ]; then
-            mkdir -p driver/android/app/src/main/res/values
-            cat > driver/android/app/src/main/res/values/google_maps_api.xml <<'EOF'
-<resources>
-  <string name="google_maps_key" translatable="false">$ANDROID_MAPS_KEY</string>
-</resources>
-EOF
-          else
-            echo "ANDROID_MAPS_KEY not set; skipping maps key XML injection"
-          fi
-          MF=driver/android/app/src/main/AndroidManifest.xml
-          if [ -f "$MF" ]; then
-            if [ -n "$ANDROID_MAPS_KEY" ]; then
-              if ! grep -q 'com.google.android.geo.API_KEY' "$MF"; then
-                sed -i "/<application/a \\    <meta-data android:name=\"com.google.android.geo.API_KEY\" android:value=\"@string/google_maps_key\" \/>" "$MF"
-              fi
-            else
-              echo "ANDROID_MAPS_KEY not set; skipping manifest meta-data injection"
-            fi
-          fi
-          APP_GRADLE=driver/android/app/build.gradle
-          PROJ_GRADLE=driver/android/build.gradle
-          if [ -f driver/android/app/google-services.json ]; then
-            echo "google-services.json found for Driver; enabling Firebase plugin and messaging dependency"
-            grep -q "apply plugin: \"com.google.gms.google-services\"" "$APP_GRADLE" || echo "apply plugin: \"com.google.gms.google-services\"" >> "$APP_GRADLE"
-            grep -q "com.google.gms:google-services" "$PROJ_GRADLE" || sed -i "s/dependencies {/dependencies\n        classpath 'com.google.gms:google-services:4.4.2'/" "$PROJ_GRADLE"
-            mkdir -p driver/android/app/src/main/java/com/hayyaride/driver
-            cat > driver/android/app/src/main/java/com/hayyaride/driver/MyFirebaseService.java <<'EOF'
-            package com.hayyaride.driver;
-            import android.os.Handler;
-            import android.os.Looper;
-            import android.widget.Toast;
-            import android.util.Log;
-            import com.google.firebase.messaging.FirebaseMessagingService;
-            public class MyFirebaseService extends FirebaseMessagingService {
-              @Override public void onNewToken(String token) {
-                Log.d("FCM_TOKEN", token);
-                new Handler(Looper.getMainLooper()).post(() ->
-                  Toast.makeText(getApplicationContext(), "FCM: "+token, Toast.LENGTH_LONG).show()
-                );
-              }
-            }
-            EOF
-            cat >> "$APP_GRADLE" <<'EOF'
-            
-            dependencies {
-              implementation platform('com.google.firebase:firebase-bom:33.7.0')
-              implementation 'com.google.firebase:firebase-messaging'
-            }
-            EOF
-            if [ -f "$MF" ] && ! grep -q 'MyFirebaseService' "$MF"; then
-              sed -i "/<application/a \\    <service android:name=\".MyFirebaseService\" android:exported=\"false\">\\n        <intent-filter>\\n            <action android:name=\"com.google.firebase.MESSAGING_EVENT\" \/>\\n        <\/intent-filter>\\n    <\/service>" "$MF"
-            fi
-          else
-            echo "No google-services.json for Driver; disabling Firebase plugin to avoid build failure"
-            sed -i "/apply plugin: \"com.google.gms.google-services\"/d" "$APP_GRADLE" || true
-            sed -i "/id ['\"]com.google.gms.google-services['\"]/d" "$APP_GRADLE" || true
-            sed -i "/com.google.gms:google-services/d" "$PROJ_GRADLE" || true
-          fi
-
       - name: Build Rider APK (debug)
-        if: ${{ hashFiles('rider/pubspec.yaml') != '' }}
         working-directory: rider
         run: flutter build apk --debug
 
       - name: Build Driver APK (debug)
-        if: ${{ hashFiles('driver/pubspec.yaml') != '' }}
         working-directory: driver
         run: flutter build apk --debug
 
