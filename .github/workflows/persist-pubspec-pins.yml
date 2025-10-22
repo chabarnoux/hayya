@@ -27,13 +27,9 @@ on:
         description: 'Commit message for pubspec.yaml edits'
         required: false
         default: 'chore(pubspec): pin collection 1.18.0 and Dart 3.5-compatible deps'
-  push:
-    branches:
-      - cursor/fix-collection-package-conflict-in-apps-dea2
 
 jobs:
   persist:
-    if: "contains(github.event.head_commit.message, '[persist]') || github.event_name == 'workflow_dispatch'"
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -44,7 +40,7 @@ jobs:
 
       - name: Add VPS host to known_hosts
         env:
-          VPS_HOST: ${{ github.event.inputs.vps_host || '159.198.36.105' }}
+          VPS_HOST: ${{ github.event.inputs.vps_host }}
         run: |
           mkdir -p ~/.ssh
           ssh-keyscan -p 22 "$VPS_HOST" >> ~/.ssh/known_hosts
@@ -52,10 +48,10 @@ jobs:
       - name: Fetch pubspecs from VPS
         env:
           SSHPASS: ${{ secrets.VPS_PASSWORD }}
-          VPS_HOST: ${{ github.event.inputs.vps_host || '159.198.36.105' }}
-          VPS_USER: ${{ github.event.inputs.vps_user || 'root' }}
-          RIDER_PATH: ${{ github.event.inputs.app_rider_path || '/var/www/tagxi/appsrc/Main-File-August-20/flutter_user/flutter_user' }}
-          DRIVER_PATH: ${{ github.event.inputs.app_driver_path || '/var/www/tagxi/appsrc/Main-File-August-20/flutter_driver/flutter_driver' }}
+          VPS_HOST: ${{ github.event.inputs.vps_host }}
+          VPS_USER: ${{ github.event.inputs.vps_user }}
+          RIDER_PATH: ${{ github.event.inputs.app_rider_path }}
+          DRIVER_PATH: ${{ github.event.inputs.app_driver_path }}
         run: |
           set -euo pipefail
           test -n "$SSHPASS"
@@ -104,24 +100,20 @@ jobs:
           sed -i -E 's/^([[:space:]]*location:[[:space:]])\^?8[[:digit:].-]*/\1^7.0.0/' "$FILE"
           sed -i -E 's/^([[:space:]]*flutter_map:[[:space:]])\^?8[[:digit:].-]*/\1^7.0.0/' "$FILE"
 
-      - name: Diff edited files
-        run: |
-          echo "--- rider diff ---"; diff -u <(cat rider_pubspec.yaml) <(cat rider_pubspec.yaml) || true
-          echo "--- driver diff ---"; diff -u <(cat driver_pubspec.yaml) <(cat driver_pubspec.yaml) || true
-
       - name: Push changes back to VPS and commit
         env:
           SSHPASS: ${{ secrets.VPS_PASSWORD }}
-          VPS_HOST: ${{ github.event.inputs.vps_host || '159.198.36.105' }}
-          VPS_USER: ${{ github.event.inputs.vps_user || 'root' }}
-          RIDER_PATH: ${{ github.event.inputs.app_rider_path || '/var/www/tagxi/appsrc/Main-File-August-20/flutter_user/flutter_user' }}
-          DRIVER_PATH: ${{ github.event.inputs.app_driver_path || '/var/www/tagxi/appsrc/Main-File-August-20/flutter_driver/flutter_driver' }}
-          BRANCH_NAME: ${{ github.event.inputs.branch_name || 'chore/persist-pubspec-pins-dart35' }}
-          COMMIT_MSG: ${{ github.event.inputs.commit_message || 'chore(pubspec): pin collection 1.18.0 and Dart 3.5-compatible deps' }}
+          VPS_HOST: ${{ github.event.inputs.vps_host }}
+          VPS_USER: ${{ github.event.inputs.vps_user }}
+          RIDER_PATH: ${{ github.event.inputs.app_rider_path }}
+          DRIVER_PATH: ${{ github.event.inputs.app_driver_path }}
+          BRANCH_NAME: ${{ github.event.inputs.branch_name }}
+          COMMIT_MSG: ${{ github.event.inputs.commit_message }}
         run: |
           set -euo pipefail
           sshpass -e scp -o StrictHostKeyChecking=no rider_pubspec.yaml "$VPS_USER@$VPS_HOST:$RIDER_PATH/pubspec.yaml"
           sshpass -e scp -o StrictHostKeyChecking=no driver_pubspec.yaml "$VPS_USER@$VPS_HOST:$DRIVER_PATH/pubspec.yaml"
 
+          # If these app directories are Git repos, commit to a branch and push (optional)
           sshpass -e ssh -o StrictHostKeyChecking=no "$VPS_USER@$VPS_HOST" bash -lc "cd '$RIDER_PATH' && if [ -d .git ]; then git checkout -B '$BRANCH_NAME' && git add pubspec.yaml && (git commit -m '$COMMIT_MSG' || true) && (git push -u origin '$BRANCH_NAME' || true); else echo 'Not a git repo: $RIDER_PATH'; fi"
           sshpass -e ssh -o StrictHostKeyChecking=no "$VPS_USER@$VPS_HOST" bash -lc "cd '$DRIVER_PATH' && if [ -d .git ]; then git checkout -B '$BRANCH_NAME' && git add pubspec.yaml && (git commit -m '$COMMIT_MSG' || true) && (git push -u origin '$BRANCH_NAME' || true); else echo 'Not a git repo: $DRIVER_PATH'; fi"
