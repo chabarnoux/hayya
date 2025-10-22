@@ -22,9 +22,7 @@ on:
       android_maps_key:
         description: 'Android Maps API key (dev) - optional if secret provided'
         required: false
-  push:
-    branches:
-      - cursor/fix-collection-package-conflict-in-apps-dea2
+
 
 jobs:
   build:
