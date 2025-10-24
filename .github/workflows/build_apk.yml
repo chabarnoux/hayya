@@ -1,10 +1,31 @@
-name: Build APKs (sanity)
+name: Build Rider & Driver APKs (Flutter)
 
 on:
   workflow_dispatch:
+    inputs:
+      vps_host:
+        description: "VPS host"
+        required: true
+        default: "159.198.36.105"
+      vps_user:
+        description: "VPS user"
+        required: true
+        default: "root"
+      app_rider_path:
+        description: "Path to Rider Flutter app on VPS"
+        required: true
+        default: "/var/www/tagxi/appsrc/Main-File-August-20/flutter_user/flutter_user"
+      app_driver_path:
+        description: "Path to Driver Flutter app on VPS"
+        required: true
+        default: "/var/www/tagxi/appsrc/Main-File-August-20/flutter_driver/flutter_driver"
+      android_maps_key:
+        description: "Android Maps API key (optional; leave blank to use secret)"
+        required: false
 
 jobs:
-  ping:
+  build:
     runs-on: ubuntu-latest
     steps:
-      - run: echo "Workflows parse correctly ✅"
+      - name: Ping
+        run: echo "Builder shell parsed ✅"
