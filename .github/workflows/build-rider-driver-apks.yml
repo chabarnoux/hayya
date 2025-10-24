@@ -108,6 +108,22 @@ jobs:
             cp -f deploy/outputs/firebase_configs/google-services-com.hayyaride.driver.json driver/android/app/google-services.json || true
           fi
 
+      - name: Create stub google-services.json if missing (Rider)
+        run: |
+          set -e
+          if [ ! -f rider/android/app/google-services.json ]; then
+            mkdir -p rider/android/app
+            printf '{"project_info":{"project_id":"stub"},"client":[{"client_info":{"mobilesdk_app_id":"1:123:android:stub","android_client_info":{"package_name":"com.hayyaride.rider"}}}],"configuration_version":"1"}' > rider/android/app/google-services.json
+          fi
+
+      - name: Create stub google-services.json if missing (Driver)
+        run: |
+          set -e
+          if [ ! -f driver/android/app/google-services.json ]; then
+            mkdir -p driver/android/app
+            printf '{"project_info":{"project_id":"stub"},"client":[{"client_info":{"mobilesdk_app_id":"1:123:android:stub","android_client_info":{"package_name":"com.hayyaride.driver"}}}],"configuration_version":"1"}' > driver/android/app/google-services.json
+          fi
+
       - name: Inject Google Maps key (Rider)
         run: |
           set -e
