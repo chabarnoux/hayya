@@ -73,11 +73,10 @@ jobs:
           if ! grep -q '^dependency_overrides:' pubspec.yaml; then
             printf "\ndependency_overrides:\n  collection: 1.18.0\n" >> pubspec.yaml
           else
-            if grep -q '^[[:space:]]*collection:' pubspec.yaml; then
-              sed -i 's/^[[:space:]]*collection:.*/  collection: 1.18.0/' pubspec.yaml
-            else
-              awk '1;/^dependency_overrides:/{print "  collection: 1.18.0"}' pubspec.yaml > pubspec.yaml.tmp && mv pubspec.yaml.tmp pubspec.yaml
-            fi
+            # Remove any existing 'collection:' within the dependency_overrides block
+            sed -i '/^dependency_overrides:/,/^[^[:space:]]/{/^[[:space:]]*collection:[[:space:]]*/d}' pubspec.yaml
+            # Append the pinned collection version just after dependency_overrides
+            sed -i '/^dependency_overrides:/a\  collection: 1.18.0' pubspec.yaml
           fi
 
       - name: Enforce dependency pins (Driver)
@@ -87,11 +86,10 @@ jobs:
           if ! grep -q '^dependency_overrides:' pubspec.yaml; then
             printf "\ndependency_overrides:\n  collection: 1.18.0\n" >> pubspec.yaml
           else
-            if grep -q '^[[:space:]]*collection:' pubspec.yaml; then
-              sed -i 's/^[[:space:]]*collection:.*/  collection: 1.18.0/' pubspec.yaml
-            else
-              awk '1;/^dependency_overrides:/{print "  collection: 1.18.0"}' pubspec.yaml > pubspec.yaml.tmp && mv pubspec.yaml.tmp pubspec.yaml
-            fi
+            # Remove any existing 'collection:' within the dependency_overrides block
+            sed -i '/^dependency_overrides:/,/^[^[:space:]]/{/^[[:space:]]*collection:[[:space:]]*/d}' pubspec.yaml
+            # Append the pinned collection version just after dependency_overrides
+            sed -i '/^dependency_overrides:/a\  collection: 1.18.0' pubspec.yaml
           fi
           sed -i 's/^\(\s*location:\s*\).*/\1^7.0.0/' pubspec.yaml || true
           sed -i 's/^\(\s*flutter_map:\s*\).*/\1^7.0.0/' pubspec.yaml || true
