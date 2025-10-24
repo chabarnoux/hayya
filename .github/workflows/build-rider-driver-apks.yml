@@ -4,122 +4,169 @@ on:
   workflow_dispatch:
     inputs:
       vps_host:
-        description: "VPS host"
-        required: true
-        default: "159.198.36.105"
+        description: VPS host
+        required: false
+        default: 159.198.36.105
       vps_user:
-        description: "VPS user"
-        required: true
-        default: "root"
-      app_rider_path:
-        description: "Rider Flutter app path on VPS"
-        required: true
-        default: "/var/www/tagxi/appsrc/Main-File-August-20/flutter_user/flutter_user"
-      app_driver_path:
-        description: "Driver Flutter app path on VPS"
-        required: true
-        default: "/var/www/tagxi/appsrc/Main-File-August-20/flutter_driver/flutter_driver"
+        description: VPS user
+        required: false
+        default: root
       android_maps_key:
-        description: "Android Maps API key (optional; leave blank to use secret)"
+        description: Optional Google Maps key; leave blank to use secret
         required: false
 
 jobs:
   build:
+    name: Build debug APKs
     runs-on: ubuntu-latest
     env:
-      VPS_HOST: ${{ github.event.inputs.vps_host }}
-      VPS_USER: ${{ github.event.inputs.vps_user }}
-      RIDER_PATH: ${{ github.event.inputs.app_rider_path }}
-      DRIVER_PATH: ${{ github.event.inputs.app_driver_path }}
-      ANDROID_MAPS_KEY_INPUT: ${{ github.event.inputs.android_maps_key }}
-      ANDROID_MAPS_KEY_SECRET: ${{ secrets.ANDROID_MAPS_DEV_KEY }}
-
+      VPS_PASSWORD: ${{ secrets.VPS_PASSWORD }}
+      ANDROID_MAPS_FALLBACK: ${{ secrets.ANDROID_MAPS_DEV_KEY }}
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
-
-      - name: Install tooling
-        run: sudo apt-get update && sudo apt-get install -y rsync openssh-client sshpass jq
-
-      - name: Add VPS host to known_hosts
-        run: |
-          mkdir -p ~/.ssh
-          ssh-keyscan -p 22 "$VPS_HOST" >> ~/.ssh/known_hosts
-
-      - name: Rsync Rider and Driver from VPS
-        env:
-          SSHPASS: ${{ secrets.VPS_PASSWORD }}
-        run: |
-          set -e
-          sshpass -e rsync -a --delete "${VPS_USER}@${VPS_HOST}:${RIDER_PATH}/" ./rider/
-          sshpass -e rsync -a --delete "${VPS_USER}@${VPS_HOST}:${DRIVER_PATH}/" ./driver/
+        with:
+          fetch-depth: 0
 
       - name: Set up Java 17
         uses: actions/setup-java@v4
         with:
-          distribution: temurin
-          java-version: "17"
+          distribution: 'temurin'
+          java-version: '17'
+          cache: 'gradle'
 
-      - name: Set up Flutter
+      - name: Set up Flutter 3.24.3 (Dart 3.5.3)
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: "3.24.3"
-          channel: stable
+          flutter-version: '3.24.3'
+          channel: 'stable'
           cache: true
 
-      - name: Accept Android SDK licenses
-        run: yes | sdkmanager --licenses || true
+      - name: Install rsync and sshpass
+        run: sudo apt-get update && sudo apt-get install -y rsync sshpass
 
-      - name: Ensure pubspec pins
+      - name: Add VPS host key to known_hosts
         run: |
-          for FILE in rider/pubspec.yaml driver/pubspec.yaml; do
-            [ -f "$FILE" ] || continue
-            grep -q '^dependency_overrides:' "$FILE" || echo -e '\ndependency_overrides:\n  collection: 1.18.0' >> "$FILE"
-            sed -i -E 's/^([[:space:]]*location:[[:space:]])\^?8[0-9.\-]*/\1^7.0.0/' "$FILE" || true
-            sed -i -E 's/^([[:space:]]*flutter_map:[[:space:]])\^?8[0-9.\-]*/\1^7.0.0/' "$FILE" || true
-          done
+          mkdir -p ~/.ssh
+          ssh-keyscan -H "${{ github.event.inputs.vps_host || '159.198.36.105' }}" >> ~/.ssh/known_hosts
 
-      - name: Flutter pub get (Rider)
-        if: ${{ hashFiles('rider/pubspec.yaml') != '' }}
+      - name: Sync Rider from VPS
+        run: |
+          mkdir -p rider
+          SSHPASS="$VPS_PASSWORD" rsync -a --delete \
+            -e "sshpass -p $VPS_PASSWORD ssh -o StrictHostKeyChecking=no" \
+            "${{ github.event.inputs.vps_user || 'root' }}@${{ github.event.inputs.vps_host || '159.198.36.105' }}:/var/www/tagxi/appsrc/Main-File-August-20/flutter_user/flutter_user/" \
+            rider/
+
+      - name: Sync Driver from VPS
+        run: |
+          mkdir -p driver
+          SSHPASS="$VPS_PASSWORD" rsync -a --delete \
+            -e "sshpass -p $VPS_PASSWORD ssh -o StrictHostKeyChecking=no" \
+            "${{ github.event.inputs.vps_user || 'root' }}@${{ github.event.inputs.vps_host || '159.198.36.105' }}:/var/www/tagxi/appsrc/Main-File-August-20/flutter_driver/flutter_driver/" \
+            driver/
+
+      - name: Enforce dependency pins (Rider)
         working-directory: rider
-        run: flutter pub get
-
-      - name: Flutter pub get (Driver)
-        if: ${{ hashFiles('driver/pubspec.yaml') != '' }}
-        working-directory: driver
-        run: flutter pub get
-
-      - name: Inject Maps key
         run: |
-          KEY="${ANDROID_MAPS_KEY_INPUT:-${ANDROID_MAPS_KEY_SECRET:-}}"
-          if [ -n "$KEY" ]; then
-            for APP in rider driver; do
-              mkdir -p "$APP/android/app/src/main/res/values"
-              cat > "$APP/android/app/src/main/res/values/google_maps_api.xml" <<EOF
-<resources>
-  <string name="google_maps_key" translatable="false">${KEY}</string>
-</resources>
-EOF
-            done
+          set -e
+          if ! grep -q '^dependency_overrides:' pubspec.yaml; then
+            printf "\ndependency_overrides:\n  collection: 1.18.0\n" >> pubspec.yaml
           else
-            echo "No Maps key provided; skipping."
+            if grep -q '^[[:space:]]*collection:' pubspec.yaml; then
+              sed -i 's/^[[:space:]]*collection:.*/  collection: 1.18.0/' pubspec.yaml
+            else
+              awk '1;/^dependency_overrides:/{print "  collection: 1.18.0"}' pubspec.yaml > pubspec.yaml.tmp && mv pubspec.yaml.tmp pubspec.yaml
+            fi
           fi
 
-      - name: Build Rider APK
-        if: ${{ hashFiles('rider/pubspec.yaml') != '' }}
+      - name: Enforce dependency pins (Driver)
+        working-directory: driver
+        run: |
+          set -e
+          if ! grep -q '^dependency_overrides:' pubspec.yaml; then
+            printf "\ndependency_overrides:\n  collection: 1.18.0\n" >> pubspec.yaml
+          else
+            if grep -q '^[[:space:]]*collection:' pubspec.yaml; then
+              sed -i 's/^[[:space:]]*collection:.*/  collection: 1.18.0/' pubspec.yaml
+            else
+              awk '1;/^dependency_overrides:/{print "  collection: 1.18.0"}' pubspec.yaml > pubspec.yaml.tmp && mv pubspec.yaml.tmp pubspec.yaml
+            fi
+          fi
+          sed -i 's/^\(\s*location:\s*\).*/\1^7.0.0/' pubspec.yaml || true
+          sed -i 's/^\(\s*flutter_map:\s*\).*/\1^7.0.0/' pubspec.yaml || true
+
+      - name: Copy google-services.json if available
+        run: |
+          set -e
+          if [ -f deploy/outputs/firebase_configs/google-services-com.hayyaride.rider.json ]; then
+            mkdir -p rider/android/app
+            cp -f deploy/outputs/firebase_configs/google-services-com.hayyaride.rider.json rider/android/app/google-services.json || true
+          fi
+          if [ -f deploy/outputs/firebase_configs/google-services-com.hayyaride.driver.json ]; then
+            mkdir -p driver/android/app
+            cp -f deploy/outputs/firebase_configs/google-services-com.hayyaride.driver.json driver/android/app/google-services.json || true
+          fi
+
+      - name: Inject Google Maps key (Rider)
+        run: |
+          set -e
+          mkdir -p rider/android/app/src/main/res/values
+          KEY="${{ github.event.inputs.android_maps_key }}"
+          if [ -z "$KEY" ]; then KEY="$ANDROID_MAPS_FALLBACK"; fi
+          printf '<resources>\n  <string name="google_maps_key" templateMergeStrategy="replace" translatable="false">%s</string>\n</resources>\n' "$KEY" > rider/android/app/src/main/res/values/google_maps_api.xml
+
+      - name: Inject Google Maps key (Driver)
+        run: |
+          set -e
+          mkdir -p driver/android/app/src/main/res/values
+          KEY="${{ github.event.inputs.android_maps_key }}"
+          if [ -z "$KEY" ]; then KEY="$ANDROID_MAPS_FALLBACK"; fi
+          printf '<resources>\n  <string name="google_maps_key" templateMergeStrategy="replace" translatable="false">%s</string>\n</resources>\n' "$KEY" > driver/android/app/src/main/res/values/google_maps_api.xml
+
+      - name: flutter pub get (Rider)
+        working-directory: rider
+        run: |
+          set -e
+          flutter pub get || (flutter pub add --dev flutter_lints:^4.0.0 && flutter pub get)
+
+      - name: flutter pub get (Driver)
+        working-directory: driver
+        run: |
+          set -e
+          flutter pub get || (flutter pub add --dev flutter_lints:^4.0.0 && flutter pub get)
+
+      - name: Build Rider debug APK
         working-directory: rider
         run: flutter build apk --debug
 
-      - name: Build Driver APK
-        if: ${{ hashFiles('driver/pubspec.yaml') != '' }}
+      - name: Build Driver debug APK
         working-directory: driver
         run: flutter build apk --debug
 
-      - name: Upload APK artifacts
+      - name: Upload APKs
         uses: actions/upload-artifact@v4
         with:
           name: hayyaride-apks
           path: |
             rider/build/app/outputs/flutter-apk/app-debug.apk
             driver/build/app/outputs/flutter-apk/app-debug.apk
-          if-no-files-found: warn
+
+      - name: Create PR with pinned dependencies
+        uses: peter-evans/create-pull-request@v6
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          branch: chore/pin-deps-dart-3-5-3
+          delete-branch: true
+          commit-message: "Pin dependencies for Dart 3.5.3 compatibility (Driver: location/flutter_map; both: collection override)"
+          title: "Pin Rider & Driver dependencies for Flutter 3.24.3 / Dart 3.5.3"
+          body: |
+            This PR persists the dependency pins applied during CI so future builds don't rely on CI-time edits.
+
+            - Pin Driver `location:^7.0.0` and `flutter_map:^7.0.0` to avoid Dart >=3.6 constraints.
+            - Add `dependency_overrides: collection: 1.18.0` to both Rider and Driver.
+            - These pins ensure `flutter pub get` succeeds on Flutter 3.24.3 (Dart 3.5.3).
+            - Revert by removing the override and upgrading to `location`/`flutter_map` ^8 when moving to Dart/Dart SDK >= 3.6.
+          add-paths: |
+            rider/pubspec.yaml
+            driver/pubspec.yaml
