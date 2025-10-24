@@ -26,6 +26,46 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      VPS_HOST: ${{ github.event.inputs.vps_host }}
+      VPS_USER: ${{ github.event.inputs.vps_user }}
+      RIDER_PATH: ${{ github.event.inputs.app_rider_path }}
+      DRIVER_PATH: ${{ github.event.inputs.app_driver_path }}
     steps:
-      - name: Ping
-        run: echo "Builder shell parsed ✅"
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install tooling
+        run: sudo apt-get update && sudo apt-get install -y rsync openssh-client sshpass jq
+
+      - name: Add VPS host to known_hosts
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan -p 22 "$VPS_HOST" >> ~/.ssh/known_hosts
+
+      - name: Rsync Rider/Driver from VPS
+        env:
+          SSHPASS: ${{ secrets.VPS_PASSWORD }}
+        run: |
+          set -euo pipefail
+          test -n "$SSHPASS"
+          sshpass -e rsync -a --delete "${VPS_USER}@${VPS_HOST}:${RIDER_PATH}/" ./rider/
+          sshpass -e rsync -a --delete "${VPS_USER}@${VPS_HOST}:${DRIVER_PATH}/" ./driver/
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Flutter 3.24.3 (stable)
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.24.3"
+          channel: stable
+          cache: true
+
+      - name: Versions
+        run: |
+          flutter --version
+          dart --version
