@@ -1,5 +1,5 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    package="package name">
+    package="com.hayyaride.driver">
 <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
     <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION"/>
@@ -52,7 +52,7 @@ android:resource="@drawable/logo" />
     <action android:name="android.intent.action.VIEW" />
     <category android:name="android.intent.category.DEFAULT" />
     <category android:name="android.intent.category.BROWSABLE" />
-    <data android:scheme="tagxi" android:host="package name" />
+    <data android:scheme="tagxi" android:host="com.hayyaride.driver" />
 </intent-filter>
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
@@ -87,7 +87,7 @@ android:resource="@drawable/logo" />
             <action android:name="android.intent.action.PROCESS_TEXT"/>
             <data android:mimeType="text/plain"/>
         </intent>
-        <package android:name="package name" />
+        <package android:name="com.hayyaride.driver" />
         <intent>
                 <action android:name="android.intent.action.VIEW" />
                 <data android:scheme="tel" />

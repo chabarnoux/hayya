@@ -20,9 +20,8 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   if (message.data['push_type'].toString() == 'meta-request') {
     AndroidIntent intent = AndroidIntent(
       action: 'action_view',
-      package: 'package name', // Your app's package name
-      componentName:
-          'package name.MainActivity', // Replace with your app's package name
+      package: 'com.hayyaride.driver',
+      componentName: 'com.hayyaride.driver.MainActivity',
     );
     await intent.launch();
   }
