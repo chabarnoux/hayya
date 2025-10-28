@@ -7,6 +7,25 @@
   "client": [
     {
       "client_info": {
+        "mobilesdk_app_id": "1:1049399235139:android:02762b77e9bb4fb0fb7af6",
+        "android_client_info": {
+          "package_name": "com.hayyaride.driver"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAdcXnKBaREy8fg2utBwQpF09HfcjuNYFc"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
         "mobilesdk_app_id": "1:1049399235139:android:208d979d287c1330fb7af6",
         "android_client_info": {
           "package_name": "com.hayyaride.rider"
