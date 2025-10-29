@@ -278,7 +278,7 @@ $value=web_map_settings();
         href="https://fonts.googleapis.com/css?family=Open+Sans:300,400,500,600,700%7cPoppins:100,200,300,400,500,600,700,800,900&amp;display=swap"
         rel="stylesheet">
         <script type="text/javascript"
-        src="https://maps.googleapis.com/maps/api/js?key={{ get_settings('google_map_key') }}'google_map_key')}}&libraries=places"></script>
+        src="https://maps.googleapis.com/maps/api/js?key={{ get_settings('google_map_key') }}&libraries=places"></script>
 
     <script>
         var lat = parseFloat("{{ auth()->user()->admin->serviceLocationDetail->zones()->pluck('lat')->first() ?? 11.015956}}");

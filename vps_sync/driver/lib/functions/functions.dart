@@ -59,7 +59,7 @@ String packageName = '';
 String signKey = '';
 
 //base url
-String url = 'base url'; //add '/' at the end of the url as 'https://url.com/'
+String url = 'https://admin.hayyaride.com/'; // base API root; must end with '/'
 String mapkey =
     (platform == TargetPlatform.android) ? 'android map key' : 'ios map key';
 

@@ -56,6 +56,11 @@ void main() async {
       [DeviceOrientation.portraitUp, DeviceOrientation.portraitDown]);
 
   await Firebase.initializeApp();
+  try {
+    final token = await FirebaseMessaging.instance.getToken();
+    // ignore: avoid_print
+    print('FCM_TOKEN: $token');
+  } catch (_) {}
   initMessaging();
   checkInternetConnection();
 

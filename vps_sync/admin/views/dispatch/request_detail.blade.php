@@ -345,7 +345,7 @@ Drop Details :
 </div>
 </main>
 
-<script type="text/javascript" src="https://maps.googleapis.com/maps/api/js?key={{ get_settings('google_map_key') }}'google_map_key')}}&libraries=places"></script>
+<script type="text/javascript" src="https://maps.googleapis.com/maps/api/js?key={{ get_settings('google_map_key') }}&libraries=places"></script>
 
 <!-- The core Firebase JS SDK is always required and must be listed first -->
 <script src="https://www.gstatic.com/firebasejs/7.19.0/firebase-app.js"></script>

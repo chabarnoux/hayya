@@ -278,7 +278,7 @@ input[type=number] {
   });
 }
 </script>
-<script type="text/javascript" src="https://maps.googleapis.com/maps/api/js?key={{ get_settings('google_map_key') }}'google_map_key') }}&libraries=drawing,geometry,places&callback=initMap" async defer></script>
+<script type="text/javascript" src="https://maps.googleapis.com/maps/api/js?key={{ get_settings('google_map_key') }}&libraries=places&callback=initMap" async defer></script>
 <script>
     // vehicle select
   document.getElementById("vehicle_type").addEventListener("input", function() {

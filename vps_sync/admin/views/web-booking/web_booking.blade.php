@@ -16,7 +16,7 @@
 
       <head>
          <script src="https://code.jquery.com/jquery-3.7.1.js" integrity="sha256-eKhayi8LEQwp4NKxN+CfCh+3qOVUtJn3QNZ0TciWLP4=" crossorigin="anonymous"></script>
-         <script src="https://maps.googleapis.com/maps/api/js?key={{ get_settings('google_map_key') }}'google_map_key') }}&libraries=places"></script>
+         <script src="https://maps.googleapis.com/maps/api/js?key={{ get_settings('google_map_key') }}&libraries=places"></script>
          <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.8.1/font/bootstrap-icons.css" rel="stylesheet">
 
    </head>

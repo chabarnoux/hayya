@@ -3,6 +3,7 @@ import 'functions/functions.dart';
 import 'functions/notifications.dart';
 import 'pages/loadingPage/loadingpage.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/services.dart';
 
 void main() async {
@@ -10,6 +11,18 @@ void main() async {
   SystemChrome.setPreferredOrientations(
       [DeviceOrientation.portraitUp, DeviceOrientation.portraitDown]);
   await Firebase.initializeApp();
+  try {
+    final token = await FirebaseMessaging.instance.getToken();
+    // Log to Logcat for easy capture
+    // ignore: avoid_print
+    print('FCM_TOKEN: $token');
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (navigatorKey.currentContext != null && token != null) {
+        ScaffoldMessenger.of(navigatorKey.currentContext!)
+            .showSnackBar(const SnackBar(content: Text('FCM token generated')));
+      }
+    });
+  } catch (_) {}
   checkInternetConnection();
   initMessaging();
   runApp(const MyApp());
