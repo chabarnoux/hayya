@@ -34,6 +34,16 @@ import '../pages/referralcode/referral_code.dart';
 import '../styles/styles.dart';
 
 //languages code
+final ValueNotifier<List<String>> initLogs = ValueNotifier<List<String>>(<String>[]);
+void logInit(String message) {
+  debugPrint(message);
+  final List<String> copy = List<String>.from(initLogs.value);
+  copy.add(message);
+  if (copy.length > 20) {
+    copy.removeAt(0);
+  }
+  initLogs.value = copy;
+}
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 dynamic phcode;
 dynamic platform;

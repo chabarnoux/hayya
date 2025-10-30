@@ -11,18 +11,22 @@ void main() async {
   SystemChrome.setPreferredOrientations(
       [DeviceOrientation.portraitUp, DeviceOrientation.portraitDown]);
   await Firebase.initializeApp();
+  logInit('INIT: firebase init ok');
   try {
     final token = await FirebaseMessaging.instance.getToken();
     // Log to Logcat for easy capture
     // ignore: avoid_print
     print('FCM_TOKEN: $token');
+    logInit('INIT: fcm token ok');
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (navigatorKey.currentContext != null && token != null) {
         ScaffoldMessenger.of(navigatorKey.currentContext!)
             .showSnackBar(const SnackBar(content: Text('FCM token generated')));
       }
     });
-  } catch (_) {}
+  } catch (e) {
+    logInit('INIT: fcm token failed: ' + e.toString());
+  }
   checkInternetConnection();
   initMessaging();
   runApp(const MyApp());

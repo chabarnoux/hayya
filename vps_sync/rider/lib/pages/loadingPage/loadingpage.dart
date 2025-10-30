@@ -152,18 +152,22 @@ class _LoadingPageState extends State<LoadingPage> {
   getLanguageDone() async {
     _package = await PackageInfo.fromPlatform();
     try {
+      logInit('INIT: version check start');
       if (platform == TargetPlatform.android) {
         _version = await FirebaseDatabase.instance
             .ref()
             .child('user_android_version')
-            .get();
+            .get()
+            .timeout(const Duration(seconds: 8));
       } else {
         _version = await FirebaseDatabase.instance
             .ref()
             .child('user_ios_version')
-            .get();
+            .get()
+            .timeout(const Duration(seconds: 8));
       }
       _error = false;
+      logInit('INIT: version check ok');
       if (_version.value != null) {
         var version = _version.value.toString().split('.');
         var package = _package.version.toString().split('.');
@@ -223,6 +227,29 @@ class _LoadingPageState extends State<LoadingPage> {
         }
       }
     } catch (e) {
+      logInit('INIT: version check failed: ' + e.toString());
+      // proceed without blocking on version
+      await getDetailsOfDevice();
+      if (internet == true) {
+        var val = await getLocalData();
+        if (val == '3') {
+          navigate();
+        } else if (choosenLanguage == '') {
+          Navigator.pushReplacement(context,
+              MaterialPageRoute(builder: (context) => const Languages()));
+        } else if (val == '2') {
+          Future.delayed(const Duration(seconds: 2), () {
+            Navigator.pushReplacement(context,
+                MaterialPageRoute(builder: (context) => const Login()));
+          });
+        } else {
+          Future.delayed(const Duration(seconds: 2), () {
+            Navigator.pushReplacement(context,
+                MaterialPageRoute(builder: (context) => const Languages()));
+          });
+        }
+        return;
+      }
       if (internet == true) {
         if (_error == false) {
           setState(() {
@@ -347,6 +374,37 @@ class _LoadingPageState extends State<LoadingPage> {
                       },
                     ))
                 : Container(),
+
+            // debug overlay (init steps)
+            Positioned(
+              left: 8,
+              top: 8,
+              child: Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: Colors.black.withOpacity(0.5),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                width: media.width * 0.9,
+                constraints: BoxConstraints(maxHeight: media.height * 0.25),
+                child: ValueListenableBuilder(
+                  valueListenable: initLogs,
+                  builder: (context, value, child) {
+                    final logs = value as List<String>;
+                    return SingleChildScrollView(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: logs
+                            .map((e) => Text(e,
+                                style: const TextStyle(
+                                    color: Colors.white, fontSize: 12)))
+                            .toList(),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ),
           ],
         ),
       ),

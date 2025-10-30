@@ -40,6 +40,16 @@ import '../styles/styles.dart';
 import 'geohash.dart';
 
 //languages code
+final ValueNotifier<List<String>> initLogs = ValueNotifier<List<String>>(<String>[]);
+void logInit(String message) {
+  debugPrint(message);
+  final List<String> copy = List<String>.from(initLogs.value);
+  copy.add(message);
+  if (copy.length > 20) {
+    copy.removeAt(0);
+  }
+  initLogs.value = copy;
+}
 dynamic phcode;
 dynamic platform;
 dynamic pref;
