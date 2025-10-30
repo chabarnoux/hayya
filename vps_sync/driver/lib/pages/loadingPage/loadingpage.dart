@@ -3,6 +3,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:firebase_database/firebase_database.dart';
+import '../../services/firebase_db.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_driver/pages/onTripPage/map_page.dart';
 import 'package:package_info_plus/package_info_plus.dart';
@@ -86,13 +87,13 @@ class _LoadingPageState extends State<LoadingPage> {
     try {
       logInit('INIT: version check start');
       if (platform == TargetPlatform.android) {
-        _version = await FirebaseDatabase.instance
+        _version = await AppDatabase.dbInstance()
             .ref()
             .child('driver_android_version')
             .get()
             .timeout(const Duration(seconds: 8));
       } else {
-        _version = await FirebaseDatabase.instance
+        _version = await AppDatabase.dbInstance()
             .ref()
             .child('driver_ios_version')
             .get()
