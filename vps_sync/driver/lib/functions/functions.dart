@@ -74,7 +74,7 @@ String mapkey =
     (platform == TargetPlatform.android) ? 'android map key' : 'ios map key';
 
 String mapStyle = '';
-String mapType = '';
+String mapType = 'google';
 
 getDetailsOfDevice() async {
   var connectivityResult = await (Connectivity().checkConnectivity());

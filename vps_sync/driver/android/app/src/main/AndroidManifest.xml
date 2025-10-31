@@ -64,7 +64,7 @@ android:resource="@drawable/logo" />
         android:enabled="true"
         android:exported="false"/>
         <meta-data android:name="com.google.android.geo.API_KEY"
-               android:value="android map key"/>
+               android:value="@string/google_maps_key"/>
         <receiver android:name=".broadcast" android:exported = "false">
             <intent-filter>
                 <action android:name="android.intent.action.NOTIFICATION" />

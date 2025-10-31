@@ -62,7 +62,7 @@ String url = 'https://admin.hayyaride.com/'; // base API root; must end with '/'
 String mapkey =
     (platform == TargetPlatform.android) ? 'android map key' : 'ios map key';
 
-String mapType = '';
+String mapType = 'google';
 
 //check internet connection
 
