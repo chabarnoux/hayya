@@ -38,18 +38,9 @@ import '../pages/onTripPage/review_page.dart';
 import '../pages/onTripPage/rides.dart';
 import '../styles/styles.dart';
 import 'geohash.dart';
+import '../utils/safe.dart';
 
 //languages code
-final ValueNotifier<List<String>> initLogs = ValueNotifier<List<String>>(<String>[]);
-void logInit(String message) {
-  debugPrint(message);
-  final List<String> copy = List<String>.from(initLogs.value);
-  copy.add(message);
-  if (copy.length > 20) {
-    copy.removeAt(0);
-  }
-  initLogs.value = copy;
-}
 dynamic phcode;
 dynamic platform;
 dynamic pref;
@@ -69,12 +60,12 @@ String packageName = '';
 String signKey = '';
 
 //base url
-String url = 'https://admin.hayyaride.com/'; // base API root; must end with '/'
+String url = 'base url'; //add '/' at the end of the url as 'https://url.com/'
 String mapkey =
     (platform == TargetPlatform.android) ? 'android map key' : 'ios map key';
 
 String mapStyle = '';
-String mapType = 'google';
+String mapType = '';
 
 getDetailsOfDevice() async {
   var connectivityResult = await (Connectivity().checkConnectivity());
@@ -682,9 +673,6 @@ registerDriver() async {
         ? await FirebaseMessaging.instance.getToken()
         : await FirebaseMessaging.instance.getAPNSToken();
     var fcm = token.toString();
-    try {
-      debugPrint('FCM_TOKEN: ' + fcm);
-    } catch (_) {}
 
     final response = http.MultipartRequest(
         'POST', Uri.parse('${url}api/v1/driver/register'));
@@ -821,9 +809,6 @@ registerOwner() async {
         ? await FirebaseMessaging.instance.getToken()
         : await FirebaseMessaging.instance.getAPNSToken();
     var fcm = token.toString();
-    try {
-      debugPrint('FCM_TOKEN: ' + fcm);
-    } catch (_) {}
     final response =
         http.MultipartRequest('POST', Uri.parse('${url}api/v1/owner/register'));
     response.headers.addAll({'Content-Type': 'application/json'});
@@ -1371,9 +1356,6 @@ driverLogin(number, login, password, isOtp) async {
         ? await FirebaseMessaging.instance.getToken()
         : await FirebaseMessaging.instance.getAPNSToken();
     var fcm = token.toString();
-    try {
-      debugPrint('FCM_TOKEN: ' + fcm);
-    } catch (_) {}
     var response = await http.post(Uri.parse('${url}api/v1/driver/login'),
         headers: {
           'Content-Type': 'application/json',
@@ -1479,12 +1461,21 @@ getUserDetails() async {
       if (userDetails['transport_type'] != null) {
         transportType = userDetails['transport_type'];
       }
+      // Safe parsing for map_type
       if (mapType == '') {
-        mapType = userDetails['map_type'];
+        final mt = userDetails['map_type'];
+        if (mt is String && mt.isNotEmpty) {
+          mapType = mt;
+        }
       }
       if (userDetails['role'] != 'owner') {
-        if (userDetails['sos']['data'] != null) {
-          sosData = userDetails['sos']['data'];
+        // Safe parsing for sos
+        final sosObj = m(userDetails['sos']);
+        final sosDataRaw = sosObj['data'];
+        if (sosDataRaw != null && sosDataRaw is List) {
+          sosData = sosDataRaw;
+        } else {
+          sosData = [];
         }
         if (userDetails['onTripRequest'] != null) {
           addressList.clear();
