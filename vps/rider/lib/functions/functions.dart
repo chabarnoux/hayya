@@ -14,7 +14,6 @@ import 'package:http/http.dart' as http;
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
-import 'package:flutter/services.dart';
 import 'package:latlong2/latlong.dart' as fmlt;
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -33,6 +32,7 @@ import '../pages/onTripPage/map_page.dart';
 import '../pages/onTripPage/review_page.dart';
 import '../pages/referralcode/referral_code.dart';
 import '../styles/styles.dart';
+import '../utils/safe.dart';
 
 //languages code
 dynamic phcode;
@@ -417,12 +417,6 @@ registerUser() async {
     var token = (platform == TargetPlatform.android)
         ? await FirebaseMessaging.instance.getToken()
         : await FirebaseMessaging.instance.getAPNSToken();
-    if (token != null && platform == TargetPlatform.android) {
-      const channel = MethodChannel('flutter.app/fcm');
-      try {
-        await channel.invokeMethod('logToken', {'token': token});
-      } catch (_) {}
-    }
     var fcm = token.toString();
     final response =
         http.MultipartRequest('POST', Uri.parse('${url}api/v1/user/register'));
@@ -772,19 +766,37 @@ getUserDetails({id}) async {
       userDetails =
           Map<String, dynamic>.from(jsonDecode(response.body)['data']);
 
-      favAddress = userDetails['favouriteLocations']['data'];
-      sosData = userDetails['sos']['data'];
+      // Safe parsing for favouriteLocations
+      final favLoc = m(userDetails['favouriteLocations']);
+      favAddress = l(favLoc['data']);
+
+      // Safe parsing for sos
+      final sosObj = m(userDetails['sos']);
+      sosData = l(sosObj['data']);
+
+      // Safe parsing for map_type
       if (mapType == '') {
-        mapType = userDetails['map_type'];
+        final mt = userDetails['map_type'];
+        if (mt is String && mt.isNotEmpty) {
+          mapType = mt;
+        }
       }
       if (outStationPushStream == null) {
         outStationPush();
       }
-      if (userDetails['bannerImage']['data'].toString().startsWith('{')) {
+      
+      // Safe parsing for bannerImage (can be null, object, or list)
+      final banner = m(userDetails['bannerImage']);
+      final bdata = banner['data'];
+      if (bdata == null) {
+        banners = <dynamic>[];
+      } else if (bdata.toString().startsWith('{')) {
         banners.clear();
-        banners.add(userDetails['bannerImage']['data']);
+        banners.add(bdata);
+      } else if (bdata is List) {
+        banners = bdata;
       } else {
-        banners = userDetails['bannerImage']['data'];
+        banners = <dynamic>[];
       }
       if (userDetails['onTripRequest'] != null) {
         addressList.clear();

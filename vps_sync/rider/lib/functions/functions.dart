@@ -32,19 +32,9 @@ import '../pages/onTripPage/map_page.dart';
 import '../pages/onTripPage/review_page.dart';
 import '../pages/referralcode/referral_code.dart';
 import '../styles/styles.dart';
+import '../utils/safe.dart';
 
 //languages code
-final ValueNotifier<List<String>> initLogs = ValueNotifier<List<String>>(<String>[]);
-void logInit(String message) {
-  debugPrint(message);
-  final List<String> copy = List<String>.from(initLogs.value);
-  copy.add(message);
-  if (copy.length > 20) {
-    copy.removeAt(0);
-  }
-  initLogs.value = copy;
-}
-final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 dynamic phcode;
 dynamic platform;
 dynamic pref;
@@ -58,11 +48,11 @@ String packageName = '';
 String signKey = '';
 
 //base url
-String url = 'https://admin.hayyaride.com/'; // base API root; must end with '/'
+String url = 'base url'; //add '/' at the end of the url as 'https://url.com/'
 String mapkey =
     (platform == TargetPlatform.android) ? 'android map key' : 'ios map key';
 
-String mapType = 'google';
+String mapType = '';
 
 //check internet connection
 
@@ -428,12 +418,6 @@ registerUser() async {
         ? await FirebaseMessaging.instance.getToken()
         : await FirebaseMessaging.instance.getAPNSToken();
     var fcm = token.toString();
-    try {
-      debugPrint('FCM_TOKEN: ' + fcm);
-      // ignore: use_build_context_synchronously
-      ScaffoldMessenger.of(navigatorKey.currentContext!)
-          .showSnackBar(const SnackBar(content: Text('FCM token generated')));
-    } catch (_) {}
     final response =
         http.MultipartRequest('POST', Uri.parse('${url}api/v1/user/register'));
 
@@ -689,12 +673,6 @@ userLogin(number, login, password, isOtp) async {
         ? await FirebaseMessaging.instance.getToken()
         : await FirebaseMessaging.instance.getAPNSToken();
     var fcm = token.toString();
-    try {
-      debugPrint('FCM_TOKEN: ' + fcm);
-      // ignore: use_build_context_synchronously
-      ScaffoldMessenger.of(navigatorKey.currentContext!)
-          .showSnackBar(const SnackBar(content: Text('FCM token generated')));
-    } catch (_) {}
     var response = await http.post(Uri.parse('${url}api/v1/user/login'),
         headers: {
           'Content-Type': 'application/json',
@@ -788,15 +766,17 @@ getUserDetails({id}) async {
       userDetails =
           Map<String, dynamic>.from(jsonDecode(response.body)['data']);
 
-      // Safe reads for optional fields
-      final dynamic favLoc = userDetails['favouriteLocations'];
-      favAddress = (favLoc != null && favLoc['data'] is List)
-          ? favLoc['data']
-          : <dynamic>[];
-      final dynamic sos = userDetails['sos'];
-      sosData = (sos != null && sos['data'] is List) ? sos['data'] : <dynamic>[];
+      // Safe parsing for favouriteLocations
+      final favLoc = m(userDetails['favouriteLocations']);
+      favAddress = l(favLoc['data']);
+
+      // Safe parsing for sos
+      final sosObj = m(userDetails['sos']);
+      sosData = l(sosObj['data']);
+
+      // Safe parsing for map_type
       if (mapType == '') {
-        final dynamic mt = userDetails['map_type'];
+        final mt = userDetails['map_type'];
         if (mt is String && mt.isNotEmpty) {
           mapType = mt;
         }
@@ -804,14 +784,17 @@ getUserDetails({id}) async {
       if (outStationPushStream == null) {
         outStationPush();
       }
-      final dynamic banner = userDetails['bannerImage'];
-      if (banner != null && banner['data'] != null) {
-        if (banner['data'].toString().startsWith('{')) {
-          banners.clear();
-          banners.add(banner['data']);
-        } else {
-          banners = banner['data'];
-        }
+      
+      // Safe parsing for bannerImage (can be null, object, or list)
+      final banner = m(userDetails['bannerImage']);
+      final bdata = banner['data'];
+      if (bdata == null) {
+        banners = <dynamic>[];
+      } else if (bdata.toString().startsWith('{')) {
+        banners.clear();
+        banners.add(bdata);
+      } else if (bdata is List) {
+        banners = bdata;
       } else {
         banners = <dynamic>[];
       }
