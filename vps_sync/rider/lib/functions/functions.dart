@@ -788,19 +788,32 @@ getUserDetails({id}) async {
       userDetails =
           Map<String, dynamic>.from(jsonDecode(response.body)['data']);
 
-      favAddress = userDetails['favouriteLocations']['data'];
-      sosData = userDetails['sos']['data'];
+      // Safe reads for optional fields
+      final dynamic favLoc = userDetails['favouriteLocations'];
+      favAddress = (favLoc != null && favLoc['data'] is List)
+          ? favLoc['data']
+          : <dynamic>[];
+      final dynamic sos = userDetails['sos'];
+      sosData = (sos != null && sos['data'] is List) ? sos['data'] : <dynamic>[];
       if (mapType == '') {
-        mapType = userDetails['map_type'];
+        final dynamic mt = userDetails['map_type'];
+        if (mt is String && mt.isNotEmpty) {
+          mapType = mt;
+        }
       }
       if (outStationPushStream == null) {
         outStationPush();
       }
-      if (userDetails['bannerImage']['data'].toString().startsWith('{')) {
-        banners.clear();
-        banners.add(userDetails['bannerImage']['data']);
+      final dynamic banner = userDetails['bannerImage'];
+      if (banner != null && banner['data'] != null) {
+        if (banner['data'].toString().startsWith('{')) {
+          banners.clear();
+          banners.add(banner['data']);
+        } else {
+          banners = banner['data'];
+        }
       } else {
-        banners = userDetails['bannerImage']['data'];
+        banners = <dynamic>[];
       }
       if (userDetails['onTripRequest'] != null) {
         addressList.clear();
