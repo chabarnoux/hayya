@@ -124,4 +124,4 @@ flutter:
   # see https://flutter.dev/to/font-from-package
 
 dependency_overrides:
-  collection: 1.18.0
+  collection: 1.19.1
